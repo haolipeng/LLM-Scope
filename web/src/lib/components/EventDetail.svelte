@@ -11,6 +11,9 @@
     <p><strong>PID:</strong> {event.pid}</p>
     <p><strong>进程:</strong> {event.comm}</p>
     <p><strong>时间:</strong> {event.timestamp_unix_ms ? new Date(event.timestamp_unix_ms).toLocaleString() : event.timestamp_ns}</p>
+    {#if event.source === 'tool_call' && event.data?.tool_name}
+      <p><strong>工具:</strong> {event.data.tool_name}</p>
+    {/if}
     <pre>{JSON.stringify(event.data, null, 2)}</pre>
   {/if}
 </section>

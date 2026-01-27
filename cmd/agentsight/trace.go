@@ -147,6 +147,7 @@ func runTrace(cmd *cobra.Command, _ []string) {
 	}
 
 	var analyzers []analyzer.Analyzer
+	analyzers = append(analyzers, analyzer.NewToolCallAggregator())
 	if logFile != "" {
 		analyzers = append(analyzers, analyzer.NewFileLogger(logFile, rotateLogs, maxLogSize))
 	}

@@ -35,6 +35,7 @@ func runProcess(cmd *cobra.Command, args []string) {
 	procRunner := runner.NewProcessRunner(runner.ProcessConfig{Args: args})
 
 	var analyzers []analyzer.Analyzer
+	analyzers = append(analyzers, analyzer.NewToolCallAggregator())
 	if logFile != "" {
 		analyzers = append(analyzers, analyzer.NewFileLogger(logFile, rotateLogs, maxLogSize))
 	}

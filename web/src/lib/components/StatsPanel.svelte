@@ -7,6 +7,7 @@
     system: '#6a4f82',
     http_parser: '#2e8b57',
     sse_processor: '#cc4f5a',
+    tool_call: '#8a6f3d',
     unknown: '#6c5b4c'
   };
 </script>

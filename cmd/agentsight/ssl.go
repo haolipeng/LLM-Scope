@@ -72,6 +72,7 @@ func runSSL(cmd *cobra.Command, args []string) {
 	if sseMerge {
 		analyzers = append(analyzers, analyzer.NewSSEMerger())
 	}
+	analyzers = append(analyzers, analyzer.NewToolCallAggregator())
 	if logFile != "" {
 		analyzers = append(analyzers, analyzer.NewFileLogger(logFile, rotateLogs, maxLogSize))
 	}

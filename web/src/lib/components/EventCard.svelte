@@ -8,7 +8,8 @@
     process: '#4b7a85',
     system: '#6a4f82',
     http_parser: '#2e8b57',
-    sse_processor: '#cc4f5a'
+    sse_processor: '#cc4f5a',
+    tool_call: '#8a6f3d'
   };
 
   const color = colorMap[event.source] || '#6c5b4c';
@@ -27,6 +28,9 @@
     }
     if (data.method && data.path) {
       return `${data.method} ${data.path}`;
+    }
+    if (data.event_type) {
+      return data.tool_name ? `${data.event_type} ${data.tool_name}` : `${data.event_type}`;
     }
     if (data.event) {
       return `${data.event}`;
