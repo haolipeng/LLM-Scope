@@ -1,0 +1,12 @@
+{
+  "timestamp_ns": 1234568010,
+  "timestamp_unix_ms": 1700000000210,
+  "source": "process",
+  "pid": 4321,
+  "comm": "bash",
+  "data": {
+    "event": "FILE_OPEN",
+    "filepath": "/etc/passwd",
+    "flags": 0
+  }
+}

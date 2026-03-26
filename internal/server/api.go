@@ -9,18 +9,21 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// getEvents returns the log file contents as text/plain.
+// getEvents returns the log file contents as NDJSON text/plain.
 func getEvents(hub *EventHub) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		logPath := hub.LogFile()
 		if logPath == "" {
-			c.JSON(http.StatusOK, gin.H{"events": []interface{}{}})
+			c.Header("Content-Type", "text/plain")
+			c.String(http.StatusOK, "")
 			return
 		}
 
 		data, err := os.ReadFile(logPath)
 		if err != nil {
-			c.String(http.StatusInternalServerError, "Failed to read log file: %v", err)
+			// File may not exist yet (no events captured)
+			c.Header("Content-Type", "text/plain")
+			c.String(http.StatusOK, "")
 			return
 		}
 		c.Header("Content-Type", "text/plain")

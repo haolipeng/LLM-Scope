@@ -1,0 +1,10 @@
+{
+  "timestamp_ns": 1234567891,
+  "timestamp_unix_ms": 1700000000001,
+  "source": "ssl",
+  "pid": 1234,
+  "comm": "curl",
+  "data": {
+    "data": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"
+  }
+}

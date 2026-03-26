@@ -1,0 +1,10 @@
+{
+  "timestamp_ns": 1234567900,
+  "timestamp_unix_ms": 1700000000100,
+  "source": "ssl",
+  "pid": 1234,
+  "comm": "curl",
+  "data": {
+    "data": "5\r\nevent: message_start\r\n1f\r\ndata: {\"message\":{\"id\":\"m1\"}}\r\n0\r\n\r\n"
+  }
+}

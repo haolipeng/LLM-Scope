@@ -1,10 +1,7 @@
 package server
 
-import "embed"
+import iofs "io/fs"
 
-//go:embed web/dist/**
-var webAssets embed.FS
-
-func WebAssets() embed.FS {
-	return webAssets
+func WebAssets() iofs.FS {
+	return nil
 }

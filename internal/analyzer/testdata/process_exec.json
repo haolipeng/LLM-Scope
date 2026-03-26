@@ -1,0 +1,12 @@
+{
+  "timestamp_ns": 1234568000,
+  "timestamp_unix_ms": 1700000000200,
+  "source": "process",
+  "pid": 4321,
+  "comm": "bash",
+  "data": {
+    "event": "EXEC",
+    "filename": "/usr/bin/git",
+    "full_command": "git status"
+  }
+}

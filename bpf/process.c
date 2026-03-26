@@ -273,7 +273,7 @@ static uint64_t hash_file_open(const struct event *e)
 // Get count for FILE_OPEN operations (handles deduplication internally)
 static uint32_t get_file_open_count(const struct event *e, uint64_t timestamp_ns, char *warning_msg, size_t warning_msg_size)
 {
-	if (e->type != EVENT_TYPE_FILE_OPERATION || !e->file_op.is_open) {
+	if (e->type != EVENT_TYPE_FILE_OPERATION || e->file_op.op_type != FILE_OP_OPEN) {
 		return 1;  // Return count of 1 for non-FILE_OPEN operations
 	}
 	
@@ -313,7 +313,7 @@ static uint32_t get_file_open_count(const struct event *e, uint64_t timestamp_ns
 					.file_op = {
 						.fd = -1,
 						.flags = file_hashes[i].flags,
-						.is_open = true
+						.op_type = FILE_OP_OPEN
 					}
 				};
 				strncpy(fake_event.comm, file_hashes[i].comm, TASK_COMM_LEN - 1);
@@ -389,7 +389,7 @@ static void flush_pid_file_opens(pid_t pid, uint64_t timestamp_ns)
 				.file_op = {
 					.fd = -1,
 					.flags = file_hashes[i].flags,
-					.is_open = true
+					.op_type = FILE_OP_OPEN
 				}
 			};
 			strncpy(fake_event.comm, file_hashes[i].comm, TASK_COMM_LEN - 1);
@@ -577,27 +577,165 @@ static int handle_event(void *ctx, void *data, size_t data_sz)
 			break;
 
 		case EVENT_TYPE_FILE_OPERATION:
-			// Only handle FILE_OPEN events, skip FILE_CLOSE
-			if (!e->file_op.is_open) {
+			// Handle FILE_OPEN events
+			if (e->file_op.op_type == FILE_OP_OPEN) {
+				// Check if should report file ops for this PID
+				if (!should_report_file_ops(tracker, e->pid)) {
+					break;
+				}
+
+				// Get count for this FILE_OPEN operation
+				char warning_msg[128];
+				uint32_t count = get_file_open_count(e, timestamp_ns, warning_msg, sizeof(warning_msg));
+
+				// Skip if this is a duplicate (count == 0)
+				if (count == 0) {
+					break;
+				}
+
+				// Report the FILE_OPEN event with count
+				print_file_open_event(e, timestamp_ns, count, strlen(warning_msg) > 0 ? warning_msg : NULL);
+			}
+			// Handle FILE_DELETE events
+			else if (e->file_op.op_type == FILE_OP_DELETE) {
+				// Check if should report file ops for this PID
+				if (!should_report_file_ops(tracker, e->pid)) {
+					break;
+				}
+
+				// Report the FILE_DELETE event
+				printf("{");
+				printf("\"timestamp\":%llu,", timestamp_ns);
+				printf("\"event\":\"FILE_DELETE\",");
+				printf("\"comm\":\"%s\",", e->comm);
+				printf("\"pid\":%d,", e->pid);
+				printf("\"filepath\":\"%s\",", e->file_op.filepath);
+				printf("\"flags\":%d", e->file_op.flags);
+				printf("}\n");
+				fflush(stdout);
+			}
+			break;
+
+		case EVENT_TYPE_CRED_CHANGE:
+			// Check if should report credential changes for this PID
+			if (!should_report_file_ops(tracker, e->pid)) {
 				break;
 			}
 
+			// Report the CRED_CHANGE event with full credential details
+			printf("{");
+			printf("\"timestamp\":%llu,", (unsigned long long)timestamp_ns);
+			printf("\"event\":\"CRED_CHANGE\",");
+			printf("\"comm\":\"%s\",", e->comm);
+			printf("\"pid\":%d,", e->pid);
+			printf("\"ppid\":%d,", e->ppid);
+
+			// Old credentials
+			printf("\"old\":{");
+			printf("\"uid\":%u,", e->cred.old.uid);
+			printf("\"gid\":%u,", e->cred.old.gid);
+			printf("\"suid\":%u,", e->cred.old.suid);
+			printf("\"sgid\":%u,", e->cred.old.sgid);
+			printf("\"euid\":%u,", e->cred.old.euid);
+			printf("\"egid\":%u,", e->cred.old.egid);
+			printf("\"fsuid\":%u,", e->cred.old.fsuid);
+			printf("\"fsgid\":%u,", e->cred.old.fsgid);
+			printf("\"cap_inheritable\":%llu,", (unsigned long long)e->cred.old.cap_inheritable);
+			printf("\"cap_permitted\":%llu,", (unsigned long long)e->cred.old.cap_permitted);
+			printf("\"cap_effective\":%llu,", (unsigned long long)e->cred.old.cap_effective);
+			printf("\"cap_bset\":%llu,", (unsigned long long)e->cred.old.cap_bset);
+			printf("\"cap_ambient\":%llu", (unsigned long long)e->cred.old.cap_ambient);
+			printf("},");
+
+			// New credentials
+			printf("\"new\":{");
+			printf("\"uid\":%u,", e->cred.new.uid);
+			printf("\"gid\":%u,", e->cred.new.gid);
+			printf("\"suid\":%u,", e->cred.new.suid);
+			printf("\"sgid\":%u,", e->cred.new.sgid);
+			printf("\"euid\":%u,", e->cred.new.euid);
+			printf("\"egid\":%u,", e->cred.new.egid);
+			printf("\"fsuid\":%u,", e->cred.new.fsuid);
+			printf("\"fsgid\":%u,", e->cred.new.fsgid);
+			printf("\"cap_inheritable\":%llu,", (unsigned long long)e->cred.new.cap_inheritable);
+			printf("\"cap_permitted\":%llu,", (unsigned long long)e->cred.new.cap_permitted);
+			printf("\"cap_effective\":%llu,", (unsigned long long)e->cred.new.cap_effective);
+			printf("\"cap_bset\":%llu,", (unsigned long long)e->cred.new.cap_bset);
+			printf("\"cap_ambient\":%llu", (unsigned long long)e->cred.new.cap_ambient);
+			printf("}");
+
+			printf("}\n");
+			fflush(stdout);
+			break;
+
+		case EVENT_TYPE_NET_CONNECT:
+			// Check if should report network events for this PID
+			if (!should_report_file_ops(tracker, e->pid)) {
+				break;
+			}
+
+			// Report the NET_CONNECT event
+			printf("{");
+			printf("\"timestamp\":%llu,", (unsigned long long)timestamp_ns);
+			printf("\"event\":\"NET_CONNECT\",");
+			printf("\"comm\":\"%s\",", e->comm);
+			printf("\"pid\":%d,", e->pid);
+			printf("\"family\":%u,", e->net.family);
+			printf("\"port\":%u,", e->net.port);
+
+			if (e->net.family == 2) {  /* AF_INET */
+				unsigned char *ip = (unsigned char *)&e->net.addr.ipv4;
+				printf("\"ip\":\"%u.%u.%u.%u\"", ip[0], ip[1], ip[2], ip[3]);
+			} else {  /* AF_INET6 */
+				printf("\"ip\":\"%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x\"",
+					e->net.addr.ipv6[0], e->net.addr.ipv6[1],
+					e->net.addr.ipv6[2], e->net.addr.ipv6[3],
+					e->net.addr.ipv6[4], e->net.addr.ipv6[5],
+					e->net.addr.ipv6[6], e->net.addr.ipv6[7],
+					e->net.addr.ipv6[8], e->net.addr.ipv6[9],
+					e->net.addr.ipv6[10], e->net.addr.ipv6[11],
+					e->net.addr.ipv6[12], e->net.addr.ipv6[13],
+					e->net.addr.ipv6[14], e->net.addr.ipv6[15]);
+			}
+
+			printf("}\n");
+			fflush(stdout);
+			break;
+
+		case EVENT_TYPE_FILE_RENAME:
 			// Check if should report file ops for this PID
 			if (!should_report_file_ops(tracker, e->pid)) {
 				break;
 			}
 
-			// Get count for this FILE_OPEN operation
-			char warning_msg[128];
-			uint32_t count = get_file_open_count(e, timestamp_ns, warning_msg, sizeof(warning_msg));
+			// Report the FILE_RENAME event
+			printf("{");
+			printf("\"timestamp\":%llu,", (unsigned long long)timestamp_ns);
+			printf("\"event\":\"FILE_RENAME\",");
+			printf("\"comm\":\"%s\",", e->comm);
+			printf("\"pid\":%d,", e->pid);
+			printf("\"oldpath\":\"%s\",", e->rename.oldpath);
+			printf("\"newpath\":\"%s\"", e->rename.newpath);
+			printf("}\n");
+			fflush(stdout);
+			break;
 
-			// Skip if this is a duplicate (count == 0)
-			if (count == 0) {
+		case EVENT_TYPE_DIR_CREATE:
+			// Check if should report file ops for this PID
+			if (!should_report_file_ops(tracker, e->pid)) {
 				break;
 			}
 
-			// Report the FILE_OPEN event with count
-			print_file_open_event(e, timestamp_ns, count, strlen(warning_msg) > 0 ? warning_msg : NULL);
+			// Report the DIR_CREATE event
+			printf("{");
+			printf("\"timestamp\":%llu,", (unsigned long long)timestamp_ns);
+			printf("\"event\":\"DIR_CREATE\",");
+			printf("\"comm\":\"%s\",", e->comm);
+			printf("\"pid\":%d,", e->pid);
+			printf("\"path\":\"%s\",", e->mkdir.path);
+			printf("\"mode\":%d", e->mkdir.mode);
+			printf("}\n");
+			fflush(stdout);
 			break;
 
 		default:
