@@ -82,6 +82,18 @@ func (s *SSEMerger) handleEvent(event *core.Event, out chan<- *core.Event) {
 		return
 	}
 
+	// Skip metadata-only chunks
+	allMetadata := true
+	for _, e := range sseEvents {
+		if !isMetadataOnlyChunk(e) {
+			allMetadata = false
+			break
+		}
+	}
+	if allMetadata {
+		return
+	}
+
 	key, messageID := s.connectionID(event, sseEvents, payload)
 	if key == "" {
 		out <- event
@@ -108,12 +120,18 @@ func (s *SSEMerger) handleEvent(event *core.Event, out chan<- *core.Event) {
 	s.mu.Unlock()
 
 	if completed {
-		merged := acc.toEvent(event)
-		s.mu.Lock()
-		delete(s.buffers, key)
-		s.mu.Unlock()
-		if merged != nil {
-			out <- merged
+		if acc.hasMeaningfulContent() {
+			merged := acc.toEvent(event)
+			s.mu.Lock()
+			delete(s.buffers, key)
+			s.mu.Unlock()
+			if merged != nil {
+				out <- merged
+			}
+		} else {
+			s.mu.Lock()
+			delete(s.buffers, key)
+			s.mu.Unlock()
 		}
 	}
 }
@@ -123,11 +141,13 @@ func (s *SSEMerger) flushExpired(out chan<- *core.Event) {
 	s.mu.Lock()
 	for key, acc := range s.buffers {
 		if now.Sub(acc.lastUpdate) >= s.timeout {
-			event := acc.toEvent(nil)
-			delete(s.buffers, key)
-			if event != nil {
-				out <- event
+			if acc.hasMeaningfulContent() {
+				event := acc.toEvent(nil)
+				if event != nil {
+					out <- event
+				}
 			}
+			delete(s.buffers, key)
 		}
 	}
 	s.mu.Unlock()
@@ -185,6 +205,33 @@ func (a *sseAccumulator) isComplete() bool {
 		return true
 	}
 
+	return false
+}
+
+// hasMeaningfulContent checks whether the accumulated content has
+// meaningful JSON or text data (not just empty/whitespace).
+func (a *sseAccumulator) hasMeaningfulContent() bool {
+	if strings.TrimSpace(a.accumulatedJSON) != "" {
+		return true
+	}
+	if strings.TrimSpace(a.accumulatedText) != "" {
+		return true
+	}
+	return false
+}
+
+// isMetadataOnlyChunk identifies SSE events that are purely ping or metadata.
+func isMetadataOnlyChunk(e sseEvent) bool {
+	if e.Event == "ping" || e.Event == "heartbeat" {
+		return true
+	}
+	if e.Data == "" && e.Event == "" {
+		return true
+	}
+	trimmed := strings.TrimSpace(e.Data)
+	if trimmed == "" || trimmed == ":" || trimmed == ": " {
+		return true
+	}
 	return false
 }
 

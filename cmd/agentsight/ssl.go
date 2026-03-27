@@ -48,6 +48,8 @@ func runSSL(cmd *cobra.Command, args []string) {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
+		analyzer.PrintGlobalHTTPFilterMetrics()
+		analyzer.PrintGlobalSSLFilterMetrics()
 		cancel()
 	}()
 

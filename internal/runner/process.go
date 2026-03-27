@@ -24,8 +24,12 @@ func NewProcessRunner(config ProcessConfig) *ProcessRunner {
 	binaryPath := "bpf/process"
 	return &ProcessRunner{
 		config:   config,
-		executor: NewBinaryExecutor(binaryPath, config.Args),
+		executor: NewBinaryExecutor(binaryPath, config.Args).WithRunnerName("Process"),
 	}
+}
+
+func (r *ProcessRunner) ID() string {
+	return "process"
 }
 
 func (r *ProcessRunner) Name() string {

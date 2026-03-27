@@ -29,7 +29,7 @@ var systemCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(systemCmd)
 
-	systemCmd.Flags().IntVarP(&systemInterval, "interval", "i", 2, "监控间隔(秒)")
+	systemCmd.Flags().IntVarP(&systemInterval, "interval", "i", 10, "监控间隔(秒)")
 	systemCmd.Flags().IntVarP(&systemPID, "pid", "p", 0, "监控特定 PID")
 	systemCmd.Flags().StringVarP(&systemComm, "comm", "c", "", "按进程名监控")
 	systemCmd.Flags().BoolVar(&systemNoChildren, "no-children", false, "排除子进程")

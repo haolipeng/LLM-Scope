@@ -3,6 +3,7 @@ package analyzer
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"strings"
 
 	"github.com/eunomia-bpf/agentsight/internal/core"
@@ -10,6 +11,7 @@ import (
 
 type AuthRemover struct {
 	headers []string
+	debug   bool
 }
 
 func NewAuthRemover() *AuthRemover {
@@ -26,6 +28,12 @@ func NewAuthRemover() *AuthRemover {
 			"set-cookie",
 		},
 	}
+}
+
+func NewAuthRemoverWithDebug(debug bool) *AuthRemover {
+	a := NewAuthRemover()
+	a.debug = debug
+	return a
 }
 
 func (a *AuthRemover) Name() string {
@@ -72,10 +80,18 @@ func (a *AuthRemover) stripHeaders(raw json.RawMessage) json.RawMessage {
 		toRemove[strings.ToLower(header)] = struct{}{}
 	}
 
+	var removed []string
 	for key := range headersRaw {
 		if _, exists := toRemove[strings.ToLower(key)]; exists {
+			if a.debug {
+				removed = append(removed, key)
+			}
 			delete(headersRaw, key)
 		}
+	}
+
+	if a.debug && len(removed) > 0 {
+		log.Printf("[AuthRemover] removed headers: %s", strings.Join(removed, ", "))
 	}
 
 	data["headers"] = headersRaw
@@ -85,3 +101,6 @@ func (a *AuthRemover) stripHeaders(raw json.RawMessage) json.RawMessage {
 	}
 	return updated
 }
+
+// Ensure AuthRemover implements Analyzer
+var _ Analyzer = (*AuthRemover)(nil)

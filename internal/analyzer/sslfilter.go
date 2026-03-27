@@ -3,10 +3,29 @@ package analyzer
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
+	"sync/atomic"
 
 	"github.com/eunomia-bpf/agentsight/internal/core"
 )
+
+// Global SSL filter metrics
+var (
+	globalSSLFilterTotal    atomic.Int64
+	globalSSLFilterFiltered atomic.Int64
+	globalSSLFilterPassed   atomic.Int64
+)
+
+// PrintGlobalSSLFilterMetrics prints the global SSL filter statistics.
+func PrintGlobalSSLFilterMetrics() {
+	total := globalSSLFilterTotal.Load()
+	filtered := globalSSLFilterFiltered.Load()
+	passed := globalSSLFilterPassed.Load()
+	if total > 0 {
+		fmt.Printf("[SSL Filter] Total: %d, Filtered: %d, Passed: %d\n", total, filtered, passed)
+	}
+}
 
 type sslFilter struct {
 	filters []sslFilterExpression
@@ -37,8 +56,13 @@ func (f *sslFilter) Process(ctx context.Context, in <-chan *core.Event) <-chan *
 				if !ok {
 					return
 				}
-				if event.Source == "ssl" && f.shouldFilter(event.Data) {
-					continue
+				if event.Source == "ssl" {
+					globalSSLFilterTotal.Add(1)
+					if f.shouldFilter(event.Data) {
+						globalSSLFilterFiltered.Add(1)
+						continue
+					}
+					globalSSLFilterPassed.Add(1)
 				}
 				out <- event
 			}

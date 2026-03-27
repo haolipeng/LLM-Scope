@@ -13,6 +13,7 @@ import (
 type SSLConfig struct {
     BinaryPath string
     Args       []string
+    TLSVersion string
 }
 
 // SSLRunner executes the sslsniff binary and converts JSON output to Events.
@@ -27,10 +28,19 @@ func NewSSLRunner(config SSLConfig) *SSLRunner {
         binaryPath = "bpf/sslsniff"
     }
 
+    args := config.Args
+    if config.TLSVersion != "" {
+        args = append(args, "--tls-version", config.TLSVersion)
+    }
+
     return &SSLRunner{
         config:   config,
-        executor: NewBinaryExecutor(binaryPath, config.Args),
+        executor: NewBinaryExecutor(binaryPath, args).WithRunnerName("SSL"),
     }
+}
+
+func (r *SSLRunner) ID() string {
+    return "ssl"
 }
 
 func (r *SSLRunner) Name() string {

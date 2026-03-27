@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"sync"
 
@@ -12,17 +13,32 @@ import (
 
 // FileLogger appends each event as JSONL to a file.
 type FileLogger struct {
-	path      string
-	rotate    bool
-	maxSizeMB int
-	mu        sync.Mutex
+	path          string
+	rotate        bool
+	maxSizeMB     int
+	maxFiles      int
+	checkInterval int
+	eventCount    int
+	mu            sync.Mutex
 }
 
 func NewFileLogger(path string, rotate bool, maxSizeMB int) *FileLogger {
+	return NewFileLoggerWithOptions(path, rotate, maxSizeMB, 5, 100)
+}
+
+func NewFileLoggerWithOptions(path string, rotate bool, maxSizeMB, maxFiles, checkInterval int) *FileLogger {
+	if maxFiles <= 0 {
+		maxFiles = 5
+	}
+	if checkInterval <= 0 {
+		checkInterval = 100
+	}
 	return &FileLogger{
-		path:      path,
-		rotate:    rotate,
-		maxSizeMB: maxSizeMB,
+		path:          path,
+		rotate:        rotate,
+		maxSizeMB:     maxSizeMB,
+		maxFiles:      maxFiles,
+		checkInterval: checkInterval,
 	}
 }
 
@@ -59,7 +75,8 @@ func (f *FileLogger) writeEvent(event *core.Event) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	if f.rotate {
+	f.eventCount++
+	if f.rotate && f.eventCount%f.checkInterval == 0 {
 		f.maybeRotate()
 	}
 
@@ -90,9 +107,23 @@ func (f *FileLogger) maybeRotate() {
 		return
 	}
 
+	// Chain rotation: .N-1 → .N, ..., .1 → .2, current → .1
+	// Remove the oldest file if it exceeds maxFiles
+	oldest := fmt.Sprintf("%s.%d", f.path, f.maxFiles)
+	_ = os.Remove(oldest)
+
+	// Shift existing rotated files
+	for i := f.maxFiles - 1; i >= 1; i-- {
+		src := fmt.Sprintf("%s.%d", f.path, i)
+		dst := fmt.Sprintf("%s.%d", f.path, i+1)
+		_ = os.Rename(src, dst)
+	}
+
+	// Rotate current → .1
 	rotated := fmt.Sprintf("%s.1", f.path)
-	_ = os.Remove(rotated)
-	_ = os.Rename(f.path, rotated)
+	if err := os.Rename(f.path, rotated); err != nil {
+		log.Printf("file logger: rotate error: %v", err)
+	}
 }
 
 func normalizeBinaryData(payload []byte) []byte {

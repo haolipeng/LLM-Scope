@@ -30,9 +30,13 @@ type SystemRunner struct {
 
 func NewSystemRunner(config SystemConfig) *SystemRunner {
 	if config.IntervalSeconds <= 0 {
-		config.IntervalSeconds = 2
+		config.IntervalSeconds = 10
 	}
 	return &SystemRunner{config: config}
+}
+
+func (s *SystemRunner) ID() string {
+	return "system"
 }
 
 func (s *SystemRunner) Name() string {

@@ -17,6 +17,7 @@ var (
 	traceSSL            bool
 	traceProcess        bool
 	traceSystem         bool
+	traceStdio          bool
 	traceComm           string
 	tracePID            int
 	traceSSLUID         int
@@ -30,6 +31,10 @@ var (
 	traceMode           int
 	traceSystemInterval int
 	traceBinaryPath     string
+	traceStdioUID       int
+	traceStdioComm      string
+	traceStdioAllFDs    bool
+	traceStdioMaxBytes  int
 )
 
 var traceCmd = &cobra.Command{
@@ -55,13 +60,23 @@ func init() {
 	traceCmd.Flags().BoolVar(&traceDisableAuth, "disable-auth-removal", false, "禁用敏感头移除")
 	traceCmd.Flags().IntVar(&traceDuration, "duration", 0, "最小进程持续时间(毫秒)")
 	traceCmd.Flags().IntVar(&traceMode, "mode", 0, "进程过滤模式")
-	traceCmd.Flags().IntVar(&traceSystemInterval, "system-interval", 2, "系统监控间隔(秒)")
+	traceCmd.Flags().IntVar(&traceSystemInterval, "system-interval", 10, "系统监控间隔(秒)")
 	traceCmd.Flags().StringVar(&traceBinaryPath, "binary-path", "", "SSL 库二进制路径")
+	traceCmd.Flags().BoolVar(&traceStdio, "stdio", false, "启用 stdio 监控 (需要 --pid)")
+	traceCmd.Flags().IntVar(&traceStdioUID, "stdio-uid", 0, "stdio UID 过滤")
+	traceCmd.Flags().StringVar(&traceStdioComm, "stdio-comm", "", "stdio 进程名过滤")
+	traceCmd.Flags().BoolVar(&traceStdioAllFDs, "stdio-all-fds", false, "捕获所有 FD")
+	traceCmd.Flags().IntVar(&traceStdioMaxBytes, "stdio-max-bytes", 8192, "stdio 每事件最大字节数")
 }
 
 func runTrace(cmd *cobra.Command, _ []string) {
-	if !traceSSL && !traceProcess && !traceSystem {
-		cmd.PrintErrln("至少启用一种监控类型 (--ssl/--process/--system)")
+	if !traceSSL && !traceProcess && !traceSystem && !traceStdio {
+		cmd.PrintErrln("至少启用一种监控类型 (--ssl/--process/--system/--stdio)")
+		os.Exit(1)
+	}
+
+	if traceStdio && tracePID == 0 {
+		cmd.PrintErrln("--stdio 需要指定 --pid")
 		os.Exit(1)
 	}
 
@@ -72,6 +87,8 @@ func runTrace(cmd *cobra.Command, _ []string) {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
+		analyzer.PrintGlobalHTTPFilterMetrics()
+		analyzer.PrintGlobalSSLFilterMetrics()
 		cancel()
 	}()
 
@@ -134,6 +151,22 @@ func runTrace(cmd *cobra.Command, _ []string) {
 		runners = append(runners, runner.FromChannel("system", events))
 	}
 
+	if traceStdio {
+		stdioRunner := runner.NewStdioRunner(runner.StdioConfig{
+			PID:      tracePID,
+			UID:      traceStdioUID,
+			Comm:     traceStdioComm,
+			AllFDs:   traceStdioAllFDs,
+			MaxBytes: traceStdioMaxBytes,
+		})
+		events, err := stdioRunner.Run(ctx)
+		if err != nil {
+			cmd.PrintErrf("启动 stdio 监控失败: %v\n", err)
+			os.Exit(1)
+		}
+		runners = append(runners, runner.FromChannel("stdio", events))
+	}
+
 	combined := runner.NewCombinedRunner(runners...)
 	merged, err := combined.Run(ctx)
 	if err != nil {
@@ -180,7 +213,7 @@ func buildSSLArgs() []string {
 	if traceSSLUID != 0 {
 		args = append(args, "-u", fmt.Sprintf("%d", traceSSLUID))
 	}
-	if traceComm != "" {
+	if traceComm != "" && traceBinaryPath == "" {
 		args = append(args, "-c", traceComm)
 	}
 	if traceSSLHandshake {

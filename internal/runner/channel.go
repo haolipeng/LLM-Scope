@@ -16,6 +16,10 @@ func FromChannel(name string, stream <-chan *core.Event) Runner {
 	return &channelRunner{name: name, stream: stream}
 }
 
+func (c *channelRunner) ID() string {
+	return c.name
+}
+
 func (c *channelRunner) Name() string {
 	return c.name
 }

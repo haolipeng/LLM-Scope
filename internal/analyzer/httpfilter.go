@@ -3,10 +3,29 @@ package analyzer
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
+	"sync/atomic"
 
 	"github.com/eunomia-bpf/agentsight/internal/core"
 )
+
+// Global HTTP filter metrics
+var (
+	globalHTTPFilterTotal    atomic.Int64
+	globalHTTPFilterFiltered atomic.Int64
+	globalHTTPFilterPassed   atomic.Int64
+)
+
+// PrintGlobalHTTPFilterMetrics prints the global HTTP filter statistics.
+func PrintGlobalHTTPFilterMetrics() {
+	total := globalHTTPFilterTotal.Load()
+	filtered := globalHTTPFilterFiltered.Load()
+	passed := globalHTTPFilterPassed.Load()
+	if total > 0 {
+		fmt.Printf("[HTTP Filter] Total: %d, Filtered: %d, Passed: %d\n", total, filtered, passed)
+	}
+}
 
 type httpFilter struct {
 	filters []httpFilterExpression
@@ -37,8 +56,13 @@ func (f *httpFilter) Process(ctx context.Context, in <-chan *core.Event) <-chan 
 				if !ok {
 					return
 				}
-				if event.Source == "http_parser" && f.shouldFilter(event.Data) {
-					continue
+				if event.Source == "http_parser" {
+					globalHTTPFilterTotal.Add(1)
+					if f.shouldFilter(event.Data) {
+						globalHTTPFilterFiltered.Add(1)
+						continue
+					}
+					globalHTTPFilterPassed.Add(1)
 				}
 				out <- event
 			}

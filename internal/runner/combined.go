@@ -16,6 +16,10 @@ func NewCombinedRunner(runners ...Runner) *CombinedRunner {
 	return &CombinedRunner{runners: runners}
 }
 
+func (c *CombinedRunner) ID() string {
+	return "combined"
+}
+
 func (c *CombinedRunner) Name() string {
 	return "combined"
 }

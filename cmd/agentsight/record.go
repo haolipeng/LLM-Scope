@@ -35,7 +35,7 @@ func init() {
 func runRecord(cmd *cobra.Command, _ []string) {
 	traceSSL = true
 	traceProcess = true
-	traceSystem = false
+	traceSystem = true
 	traceComm = recordComm
 	tracePID = 0
 	traceSSLUID = 0
@@ -47,8 +47,9 @@ func runRecord(cmd *cobra.Command, _ []string) {
 	traceDisableAuth = false
 	traceDuration = 0
 	traceMode = 0
-	traceSystemInterval = 2
+	traceSystemInterval = 10
 	traceBinaryPath = recordBinaryPath
+	quiet = true
 
 	logFile = recordLogFile
 	rotateLogs = recordRotate

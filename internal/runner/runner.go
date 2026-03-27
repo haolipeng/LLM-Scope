@@ -8,6 +8,7 @@ import (
 
 // Runner produces events from a data source (eBPF binary, /proc, etc.).
 type Runner interface {
+    ID() string
     Name() string
     Run(ctx context.Context) (<-chan *core.Event, error)
     Stop() error
