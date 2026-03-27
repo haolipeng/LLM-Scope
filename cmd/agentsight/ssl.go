@@ -62,17 +62,17 @@ func runSSL(cmd *cobra.Command, args []string) {
 	if len(sslFilters) > 0 {
 		analyzers = append(analyzers, analyzer.NewSSLFilter(sslFilters))
 	}
+	if httpParser || sseMerge {
+		analyzers = append(analyzers, analyzer.NewSSEMerger())
+	}
 	if httpParser {
 		analyzers = append(analyzers, analyzer.NewHTTPParser(httpRawData))
-	}
-	if len(httpFilters) > 0 {
-		analyzers = append(analyzers, analyzer.NewHTTPFilter(httpFilters))
-	}
-	if !disableAuthRemoval {
-		analyzers = append(analyzers, analyzer.NewAuthRemover())
-	}
-	if sseMerge {
-		analyzers = append(analyzers, analyzer.NewSSEMerger())
+		if len(httpFilters) > 0 {
+			analyzers = append(analyzers, analyzer.NewHTTPFilter(httpFilters))
+		}
+		if !disableAuthRemoval {
+			analyzers = append(analyzers, analyzer.NewAuthRemover())
+		}
 	}
 	analyzers = append(analyzers, analyzer.NewToolCallAggregator())
 	if logFile != "" {

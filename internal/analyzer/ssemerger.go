@@ -44,11 +44,13 @@ func (s *SSEMerger) Process(ctx context.Context, in <-chan *core.Event) <-chan *
 		for {
 			select {
 			case <-ctx.Done():
+				s.flushAll(out)
 				return
 			case <-ticker.C:
 				s.flushExpired(out)
 			case event, ok := <-in:
 				if !ok {
+					s.flushAll(out)
 					return
 				}
 				if event.Source != "ssl" {
@@ -136,6 +138,20 @@ func (s *SSEMerger) handleEvent(event *core.Event, out chan<- *core.Event) {
 	}
 }
 
+func (s *SSEMerger) flushAll(out chan<- *core.Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, acc := range s.buffers {
+		if acc.hasMeaningfulContent() {
+			event := acc.toEvent(nil)
+			if event != nil {
+				out <- event
+			}
+		}
+		delete(s.buffers, key)
+	}
+}
+
 func (s *SSEMerger) flushExpired(out chan<- *core.Event) {
 	now := time.Now()
 	s.mu.Lock()
@@ -179,18 +195,40 @@ func (a *sseAccumulator) update(timestamp int64, events []sseEvent) {
 		if event.Event == "message_start" {
 			a.hasMessageStart = true
 		}
-		if event.Data != "" {
-			a.accumulatedText += event.Data
-			if event.ParsedData != nil {
-				if jsonBytes, err := json.Marshal(event.ParsedData); err == nil {
-					a.accumulatedJSON += string(jsonBytes)
-				}
-			}
+		if event.Event == "content_block_delta" && event.ParsedData != nil {
+			a.accumulateContentDelta(event.ParsedData)
 		}
 	}
 
 	if a.messageID == "" {
 		a.messageID = extractMessageID(events)
+	}
+}
+
+// accumulateContentDelta extracts text and partial_json from a content_block_delta event,
+// matching the Rust SSEProcessor::accumulate_content logic.
+func (a *sseAccumulator) accumulateContentDelta(parsedData map[string]interface{}) {
+	delta, ok := parsedData["delta"].(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	deltaType, _ := delta["type"].(string)
+
+	switch deltaType {
+	case "text_delta":
+		if text, ok := delta["text"].(string); ok && text != "" {
+			a.accumulatedText += text
+		}
+	case "thinking_delta":
+		if thinking, ok := delta["thinking"].(string); ok && thinking != "" {
+			a.accumulatedText += thinking
+		}
+	}
+
+	// Handle partial_json (for tool_use content blocks)
+	if partialJSON, ok := delta["partial_json"].(string); ok && partialJSON != "" {
+		a.accumulatedJSON += partialJSON
 	}
 }
 
@@ -209,8 +247,12 @@ func (a *sseAccumulator) isComplete() bool {
 }
 
 // hasMeaningfulContent checks whether the accumulated content has
-// meaningful JSON or text data (not just empty/whitespace).
+// meaningful data. A stream is meaningful if it has text/json content,
+// or if it contains a complete message (message_start was seen).
 func (a *sseAccumulator) hasMeaningfulContent() bool {
+	if a.hasMessageStart {
+		return true
+	}
 	if strings.TrimSpace(a.accumulatedJSON) != "" {
 		return true
 	}

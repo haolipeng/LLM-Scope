@@ -33,29 +33,29 @@ func init() {
 }
 
 func runRecord(cmd *cobra.Command, _ []string) {
-	traceSSL = true
-	traceProcess = true
-	traceSystem = true
-	traceComm = recordComm
-	tracePID = 0
-	traceSSLUID = 0
-	traceSSLFilter = []string{"data=0\r\n\r\n|data.type=binary"}
-	traceSSLHandshake = false
-	traceSSLHTTP = true
-	traceSSLRaw = false
-	traceHTTPFilter = []string{"request.path_prefix=/v1/rgstr | response.status_code=202 | request.method=HEAD | response.body="}
-	traceDisableAuth = false
-	traceDuration = 0
-	traceMode = 0
-	traceSystemInterval = 10
-	traceBinaryPath = recordBinaryPath
-	quiet = true
-
-	logFile = recordLogFile
-	rotateLogs = recordRotate
-	maxLogSize = recordMaxSize
-	server = true
-	serverPort = recordServerPort
-
-	runTrace(cmd, nil)
+	cfg := TraceConfig{
+		SSL:            true,
+		Process:        true,
+		System:         true,
+		Comm:           recordComm,
+		PID:            0,
+		SSLUID:         0,
+		SSLFilter:      []string{"data=0\r\n\r\n|data.type=binary"},
+		SSLHandshake:   false,
+		SSLHTTP:        true,
+		SSLRaw:         false,
+		HTTPFilter:     []string{"request.path_prefix=/v1/rgstr | response.status_code=202 | request.method=HEAD | response.body="},
+		DisableAuth:    false,
+		Duration:       0,
+		Mode:           0,
+		SystemInterval: 10,
+		BinaryPath:     recordBinaryPath,
+		Quiet:          true,
+		LogFile:        recordLogFile,
+		RotateLogs:     recordRotate,
+		MaxLogSize:     recordMaxSize,
+		Server:         true,
+		ServerPort:     recordServerPort,
+	}
+	executeTrace(cmd, cfg)
 }

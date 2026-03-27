@@ -13,6 +13,50 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// TraceConfig holds all configuration for a trace session.
+type TraceConfig struct {
+	// 监控开关
+	SSL     bool
+	Process bool
+	System  bool
+	Stdio   bool
+
+	// 通用过滤
+	Comm string
+	PID  int
+
+	// SSL 相关
+	SSLUID       int
+	SSLFilter    []string
+	SSLHandshake bool
+	SSLHTTP      bool
+	SSLRaw       bool
+	HTTPFilter   []string
+	DisableAuth  bool
+	BinaryPath   string
+
+	// Process 相关
+	Duration int
+	Mode     int
+
+	// System 相关
+	SystemInterval int
+
+	// Stdio 相关
+	StdioUID      int
+	StdioComm     string
+	StdioAllFDs   bool
+	StdioMaxBytes int
+
+	// 输出相关
+	Server     bool
+	ServerPort int
+	LogFile    string
+	Quiet      bool
+	RotateLogs bool
+	MaxLogSize int
+}
+
 var (
 	traceSSL            bool
 	traceProcess        bool
@@ -70,12 +114,45 @@ func init() {
 }
 
 func runTrace(cmd *cobra.Command, _ []string) {
-	if !traceSSL && !traceProcess && !traceSystem && !traceStdio {
+	cfg := TraceConfig{
+		SSL:            traceSSL,
+		Process:        traceProcess,
+		System:         traceSystem,
+		Stdio:          traceStdio,
+		Comm:           traceComm,
+		PID:            tracePID,
+		SSLUID:         traceSSLUID,
+		SSLFilter:      traceSSLFilter,
+		SSLHandshake:   traceSSLHandshake,
+		SSLHTTP:        traceSSLHTTP,
+		SSLRaw:         traceSSLRaw,
+		HTTPFilter:     traceHTTPFilter,
+		DisableAuth:    traceDisableAuth,
+		Duration:       traceDuration,
+		Mode:           traceMode,
+		SystemInterval: traceSystemInterval,
+		BinaryPath:     traceBinaryPath,
+		StdioUID:       traceStdioUID,
+		StdioComm:      traceStdioComm,
+		StdioAllFDs:    traceStdioAllFDs,
+		StdioMaxBytes:  traceStdioMaxBytes,
+		Server:         server,
+		ServerPort:     serverPort,
+		LogFile:        logFile,
+		Quiet:          quiet,
+		RotateLogs:     rotateLogs,
+		MaxLogSize:     maxLogSize,
+	}
+	executeTrace(cmd, cfg)
+}
+
+func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
+	if !cfg.SSL && !cfg.Process && !cfg.System && !cfg.Stdio {
 		cmd.PrintErrln("至少启用一种监控类型 (--ssl/--process/--system/--stdio)")
 		os.Exit(1)
 	}
 
-	if traceStdio && tracePID == 0 {
+	if cfg.Stdio && cfg.PID == 0 {
 		cmd.PrintErrln("--stdio 需要指定 --pid")
 		os.Exit(1)
 	}
@@ -94,23 +171,23 @@ func runTrace(cmd *cobra.Command, _ []string) {
 
 	var runners []runner.Runner
 
-	if traceSSL {
-		sslArgs := buildSSLArgs()
+	if cfg.SSL {
+		sslArgs := buildSSLArgs(cfg)
 		sslRunner := runner.NewSSLRunner(runner.SSLConfig{
 			Args: sslArgs,
 		})
 
 		sslAnalyzers := []analyzer.Analyzer{}
-		if len(traceSSLFilter) > 0 {
-			sslAnalyzers = append(sslAnalyzers, analyzer.NewSSLFilter(traceSSLFilter))
+		if len(cfg.SSLFilter) > 0 {
+			sslAnalyzers = append(sslAnalyzers, analyzer.NewSSLFilter(cfg.SSLFilter))
 		}
-		if traceSSLHTTP {
+		if cfg.SSLHTTP {
 			sslAnalyzers = append(sslAnalyzers, analyzer.NewSSEMerger())
-			sslAnalyzers = append(sslAnalyzers, analyzer.NewHTTPParser(traceSSLRaw))
-			if len(traceHTTPFilter) > 0 {
-				sslAnalyzers = append(sslAnalyzers, analyzer.NewHTTPFilter(traceHTTPFilter))
+			sslAnalyzers = append(sslAnalyzers, analyzer.NewHTTPParser(cfg.SSLRaw))
+			if len(cfg.HTTPFilter) > 0 {
+				sslAnalyzers = append(sslAnalyzers, analyzer.NewHTTPFilter(cfg.HTTPFilter))
 			}
-			if !traceDisableAuth {
+			if !cfg.DisableAuth {
 				sslAnalyzers = append(sslAnalyzers, analyzer.NewAuthRemover())
 			}
 		}
@@ -124,8 +201,8 @@ func runTrace(cmd *cobra.Command, _ []string) {
 		runners = append(runners, runner.FromChannel("ssl", sslStream))
 	}
 
-	if traceProcess {
-		procArgs := buildProcessArgs()
+	if cfg.Process {
+		procArgs := buildProcessArgs(cfg)
 		procRunner := runner.NewProcessRunner(runner.ProcessConfig{Args: procArgs})
 		events, err := procRunner.Run(ctx)
 		if err != nil {
@@ -135,11 +212,11 @@ func runTrace(cmd *cobra.Command, _ []string) {
 		runners = append(runners, runner.FromChannel("process", events))
 	}
 
-	if traceSystem {
+	if cfg.System {
 		sysRunner := runner.NewSystemRunner(runner.SystemConfig{
-			IntervalSeconds: traceSystemInterval,
-			PID:             tracePID,
-			Comm:            traceComm,
+			IntervalSeconds: cfg.SystemInterval,
+			PID:             cfg.PID,
+			Comm:            cfg.Comm,
 			IncludeChildren: true,
 		})
 		events, err := sysRunner.Run(ctx)
@@ -150,13 +227,13 @@ func runTrace(cmd *cobra.Command, _ []string) {
 		runners = append(runners, runner.FromChannel("system", events))
 	}
 
-	if traceStdio {
+	if cfg.Stdio {
 		stdioRunner := runner.NewStdioRunner(runner.StdioConfig{
-			PID:      tracePID,
-			UID:      traceStdioUID,
-			Comm:     traceStdioComm,
-			AllFDs:   traceStdioAllFDs,
-			MaxBytes: traceStdioMaxBytes,
+			PID:      cfg.PID,
+			UID:      cfg.StdioUID,
+			Comm:     cfg.StdioComm,
+			AllFDs:   cfg.StdioAllFDs,
+			MaxBytes: cfg.StdioMaxBytes,
 		})
 		events, err := stdioRunner.Run(ctx)
 		if err != nil {
@@ -173,70 +250,70 @@ func runTrace(cmd *cobra.Command, _ []string) {
 		os.Exit(1)
 	}
 
-	eventHub := agentsightserver.NewEventHub(logFile)
-	if server {
-		startServer(eventHub)
+	eventHub := agentsightserver.NewEventHub(cfg.LogFile)
+	if cfg.Server {
+		startServer(eventHub, cfg.ServerPort)
 	}
 
 	var analyzers []analyzer.Analyzer
 	analyzers = append(analyzers, analyzer.NewToolCallAggregator())
-	if logFile != "" {
-		analyzers = append(analyzers, analyzer.NewFileLogger(logFile, rotateLogs, maxLogSize))
+	if cfg.LogFile != "" {
+		analyzers = append(analyzers, analyzer.NewFileLogger(cfg.LogFile, cfg.RotateLogs, cfg.MaxLogSize))
 	}
-	if !quiet {
+	if !cfg.Quiet {
 		analyzers = append(analyzers, analyzer.NewOutput())
 	}
 
 	out := analyzer.Chain(analyzers...).Process(ctx, merged)
 	for event := range out {
-		if server {
+		if cfg.Server {
 			eventHub.Publish(event)
 		}
 	}
 }
 
-func startServer(hub *agentsightserver.EventHub) {
+func startServer(hub *agentsightserver.EventHub, port int) {
 	assets := agentsightserver.WebAssets()
 	router := agentsightserver.SetupRouter(assets, hub)
-	addr := fmt.Sprintf(":%d", serverPort)
+	addr := fmt.Sprintf(":%d", port)
 	go func() {
 		_ = router.Run(addr)
 	}()
 }
 
-func buildSSLArgs() []string {
+func buildSSLArgs(cfg TraceConfig) []string {
 	var args []string
-	if tracePID != 0 {
-		args = append(args, "-p", fmt.Sprintf("%d", tracePID))
+	if cfg.PID != 0 {
+		args = append(args, "-p", fmt.Sprintf("%d", cfg.PID))
 	}
-	if traceSSLUID != 0 {
-		args = append(args, "-u", fmt.Sprintf("%d", traceSSLUID))
+	if cfg.SSLUID != 0 {
+		args = append(args, "-u", fmt.Sprintf("%d", cfg.SSLUID))
 	}
-	if traceComm != "" && traceBinaryPath == "" {
-		args = append(args, "-c", traceComm)
+	if cfg.Comm != "" && cfg.BinaryPath == "" {
+		args = append(args, "-c", cfg.Comm)
 	}
-	if traceSSLHandshake {
+	if cfg.SSLHandshake {
 		args = append(args, "--handshake")
 	}
-	if traceBinaryPath != "" {
-		args = append(args, "--binary-path", traceBinaryPath)
+	if cfg.BinaryPath != "" {
+		args = append(args, "--binary-path", cfg.BinaryPath)
 	}
 	return args
 }
 
-func buildProcessArgs() []string {
+func buildProcessArgs(cfg TraceConfig) []string {
 	var args []string
-	if traceComm != "" {
-		args = append(args, "-c", traceComm)
+	if cfg.Comm != "" {
+		args = append(args, "-c", cfg.Comm)
 	}
-	if tracePID != 0 {
-		args = append(args, "-p", fmt.Sprintf("%d", tracePID))
+	if cfg.PID != 0 {
+		args = append(args, "-p", fmt.Sprintf("%d", cfg.PID))
 	}
-	if traceDuration > 0 {
-		args = append(args, "-d", fmt.Sprintf("%d", traceDuration))
+	if cfg.Duration > 0 {
+		args = append(args, "-d", fmt.Sprintf("%d", cfg.Duration))
 	}
-	if traceMode > 0 {
-		args = append(args, "-m", fmt.Sprintf("%d", traceMode))
+	if cfg.Mode > 0 {
+		args = append(args, "-m", fmt.Sprintf("%d", cfg.Mode))
 	}
 	return args
 }
