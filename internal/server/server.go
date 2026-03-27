@@ -27,7 +27,11 @@ func SetupRouter(webAssets iofs.FS, eventStream *EventHub) *gin.Engine {
 	if webAssets != nil {
 		assets := webAssets
 		if sub, err := iofs.Sub(webAssets, "web/dist"); err == nil {
-			assets = sub
+			// Verify the sub-directory actually exists before using it
+			if f, ferr := sub.Open("."); ferr == nil {
+				f.Close()
+				assets = sub
+			}
 		}
 		fileServer := http.FileServer(http.FS(assets))
 

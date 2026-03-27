@@ -3,7 +3,7 @@ package server
 import (
 	"sync"
 
-	"github.com/eunomia-bpf/agentsight/internal/core"
+	"github.com/haolipeng/LLM-Scope/internal/core"
 )
 
 // EventHub fans out events to SSE subscribers.

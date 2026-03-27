@@ -54,7 +54,7 @@ The AgentSight Frontend provides intuitive visualization of:
 
 ```bash
 # Clone repository
-git clone https://github.com/eunomia-bpf/agentsight.git --recursive
+git clone https://github.com/haolipeng/LLM-Scope.git --recursive
 cd agentsight/frontend
 
 # Install dependencies

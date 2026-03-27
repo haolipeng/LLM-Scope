@@ -6,8 +6,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/eunomia-bpf/agentsight/internal/analyzer"
-	"github.com/eunomia-bpf/agentsight/internal/runner"
+	"github.com/haolipeng/LLM-Scope/internal/analyzer"
+	"github.com/haolipeng/LLM-Scope/internal/runner"
 	"github.com/spf13/cobra"
 )
 

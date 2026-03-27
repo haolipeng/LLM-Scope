@@ -369,36 +369,44 @@ int trace_unlinkat(struct trace_event_raw_sys_enter *ctx)
 
 /*
  * Convert kernel_cap_t to u64
- * kernel_cap_t is u32 cap[2] array, combine into single u64
+ *
+ * kernel_cap_t changed across kernel versions:
+ *   < 6.3: struct kernel_cap_struct { u32 cap[2]; }  (8 bytes)
+ *   >= 6.3: typedef u64 kernel_cap_t                  (8 bytes)
+ *
+ * Both representations are 8 bytes with identical memory layout on
+ * little-endian (x86), so we read the raw 8 bytes using the CO-RE
+ * field offset. This avoids accessing .cap[0]/.cap[1] which don't
+ * exist on newer kernels.
  */
 static __always_inline u64 caps_to_u64(const struct cred *cred, int cap_type)
 {
-	u32 cap0 = 0, cap1 = 0;
+	u64 val = 0;
 
 	switch (cap_type) {
 	case 0: /* cap_inheritable */
-		cap0 = BPF_CORE_READ(cred, cap_inheritable.cap[0]);
-		cap1 = BPF_CORE_READ(cred, cap_inheritable.cap[1]);
+		bpf_probe_read_kernel(&val, sizeof(val),
+			(void *)cred + bpf_core_field_offset(cred->cap_inheritable));
 		break;
 	case 1: /* cap_permitted */
-		cap0 = BPF_CORE_READ(cred, cap_permitted.cap[0]);
-		cap1 = BPF_CORE_READ(cred, cap_permitted.cap[1]);
+		bpf_probe_read_kernel(&val, sizeof(val),
+			(void *)cred + bpf_core_field_offset(cred->cap_permitted));
 		break;
 	case 2: /* cap_effective */
-		cap0 = BPF_CORE_READ(cred, cap_effective.cap[0]);
-		cap1 = BPF_CORE_READ(cred, cap_effective.cap[1]);
+		bpf_probe_read_kernel(&val, sizeof(val),
+			(void *)cred + bpf_core_field_offset(cred->cap_effective));
 		break;
 	case 3: /* cap_bset */
-		cap0 = BPF_CORE_READ(cred, cap_bset.cap[0]);
-		cap1 = BPF_CORE_READ(cred, cap_bset.cap[1]);
+		bpf_probe_read_kernel(&val, sizeof(val),
+			(void *)cred + bpf_core_field_offset(cred->cap_bset));
 		break;
 	case 4: /* cap_ambient */
-		cap0 = BPF_CORE_READ(cred, cap_ambient.cap[0]);
-		cap1 = BPF_CORE_READ(cred, cap_ambient.cap[1]);
+		bpf_probe_read_kernel(&val, sizeof(val),
+			(void *)cred + bpf_core_field_offset(cred->cap_ambient));
 		break;
 	}
 
-	return ((u64)cap1 << 32) | cap0;
+	return val;
 }
 
 /* Capability type constants */

@@ -8,7 +8,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/eunomia-bpf/agentsight/internal/core"
+	"github.com/haolipeng/LLM-Scope/internal/core"
 )
 
 // FileLogger appends each event as JSONL to a file.

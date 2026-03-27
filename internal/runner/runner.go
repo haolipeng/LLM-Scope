@@ -3,7 +3,7 @@ package runner
 import (
     "context"
 
-    "github.com/eunomia-bpf/agentsight/internal/core"
+    "github.com/haolipeng/LLM-Scope/internal/core"
 )
 
 // Runner produces events from a data source (eBPF binary, /proc, etc.).

@@ -7,9 +7,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/eunomia-bpf/agentsight/internal/analyzer"
-	"github.com/eunomia-bpf/agentsight/internal/runner"
-	agentsightserver "github.com/eunomia-bpf/agentsight/internal/server"
+	"github.com/haolipeng/LLM-Scope/internal/analyzer"
+	"github.com/haolipeng/LLM-Scope/internal/runner"
+	agentsightserver "github.com/haolipeng/LLM-Scope/internal/server"
 	"github.com/spf13/cobra"
 )
 
@@ -97,8 +97,7 @@ func runTrace(cmd *cobra.Command, _ []string) {
 	if traceSSL {
 		sslArgs := buildSSLArgs()
 		sslRunner := runner.NewSSLRunner(runner.SSLConfig{
-			Args:       sslArgs,
-			BinaryPath: traceBinaryPath,
+			Args: sslArgs,
 		})
 
 		sslAnalyzers := []analyzer.Analyzer{}

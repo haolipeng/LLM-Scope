@@ -1,4 +1,4 @@
-module github.com/eunomia-bpf/agentsight
+module github.com/haolipeng/LLM-Scope
 
 go 1.21
 

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/eunomia-bpf/agentsight/internal/core"
+	"github.com/haolipeng/LLM-Scope/internal/core"
 )
 
 // Global SSL filter metrics

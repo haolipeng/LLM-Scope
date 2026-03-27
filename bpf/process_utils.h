@@ -79,71 +79,41 @@ static bool command_matches_filter(const char *comm, const char *filter)
 	return strstr(comm, filter) != NULL;
 }
 
-/* Count and print processes that match the given command filters */
 static int count_matching_processes(char **command_list, int command_count, bool trace_all)
 {
-	DIR *proc_dir;
+	DIR *dir;
 	struct dirent *entry;
-	pid_t pid, ppid;
+	int count = 0;
 	char comm[TASK_COMM_LEN];
-	int matching_count = 0;
-	
-	proc_dir = opendir("/proc");
-	if (!proc_dir) {
-		fprintf(stderr, "Failed to open /proc directory\n");
-		return -1;
-	}
-	
-	if (trace_all) {
-		printf("Tracing all processes (no filter specified)\n");
-	} else {
-		printf("Scanning existing processes for matching commands...\n");
-	}
-	
-	while ((entry = readdir(proc_dir)) != NULL) {
+
+	dir = opendir("/proc");
+	if (!dir)
+		return 0;
+
+	while ((entry = readdir(dir)) != NULL) {
 		/* Skip non-numeric entries */
-		if (strspn(entry->d_name, "0123456789") != strlen(entry->d_name))
-			continue;
-		
-		pid = (pid_t)strtol(entry->d_name, NULL, 10);
+		pid_t pid = (pid_t)strtol(entry->d_name, NULL, 10);
 		if (pid <= 0)
 			continue;
-		
-		/* Read process command */
+
 		if (read_proc_comm(pid, comm, sizeof(comm)) != 0)
 			continue;
-		
-		/* Read parent PID */
-		if (read_proc_ppid(pid, &ppid) != 0)
+
+		if (trace_all) {
+			count++;
 			continue;
-		
-		bool should_track = trace_all;
-		
-		/* If not tracing all, check if this process matches any configured filter */
-		if (!trace_all && command_list && command_count > 0) {
-			should_track = false;
-			for (int i = 0; i < command_count; i++) {
-				if (command_matches_filter(comm, command_list[i])) {
-					should_track = true;
-					break;
-				}
-			}
 		}
-		
-		if (should_track) {
-			if (!trace_all) {
-				printf("  Found matching process: PID=%d, PPID=%d, COMM=%s\n", 
-					pid, ppid, comm);
+
+		for (int i = 0; i < command_count; i++) {
+			if (command_matches_filter(comm, command_list[i])) {
+				count++;
+				break;
 			}
-			matching_count++;
 		}
 	}
-	
-	closedir(proc_dir);
-	printf("Initially tracking %d processes\n", matching_count);
-	return matching_count;
+
+	closedir(dir);
+	return count;
 }
 
-
-
-#endif /* __PROCESS_UTILS_H */ 
+#endif /* __PROCESS_UTILS_H */

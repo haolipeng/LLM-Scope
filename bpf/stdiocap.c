@@ -40,7 +40,7 @@ struct env {
 };
 
 const char *argp_program_version = "stdiocap 0.1";
-const char *argp_program_bug_address = "https://github.com/eunomia-bpf/agentsight";
+const char *argp_program_bug_address = "https://github.com/haolipeng/LLM-Scope";
 const char argp_program_doc[] =
 	"Capture stdin/stdout/stderr payloads for a target process and output JSON.\n"
 	"\n"

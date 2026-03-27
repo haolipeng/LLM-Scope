@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/eunomia-bpf/agentsight/internal/core"
+	"github.com/haolipeng/LLM-Scope/internal/core"
 )
 
 // CombinedRunner merges multiple runners into a single event stream.

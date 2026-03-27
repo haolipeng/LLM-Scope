@@ -3,7 +3,7 @@ package analyzer
 import (
 	"context"
 
-	"github.com/eunomia-bpf/agentsight/internal/core"
+	"github.com/haolipeng/LLM-Scope/internal/core"
 )
 
 // Analyzer processes events and emits transformed events.

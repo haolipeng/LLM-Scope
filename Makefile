@@ -13,7 +13,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS := -ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
 
-.PHONY: all build bpf web web-dev go clean help install dev test deps
+.PHONY: all build bpf web web-export web-dev go clean help install dev test deps
 
 all: build
 
@@ -32,6 +32,12 @@ web:
 	@echo ">>> 编译 Next.js 前端..."
 	cd $(FRONTEND_DIR) && $(NPM) install && $(NPM) run build
 	@echo "✓ 前端编译完成"
+
+# Build Next.js frontend as static export (for Go server embedding)
+web-export:
+	@echo ">>> 静态导出 Next.js 前端..."
+	cd $(FRONTEND_DIR) && $(NPM) install && NEXT_EXPORT=1 $(NPM) run build
+	@echo "✓ 前端静态导出完成: $(FRONTEND_DIR)/out/"
 
 # Start frontend dev server
 web-dev:
@@ -87,6 +93,7 @@ help:
 	@echo "  all, build  - 完整构建 (BPF + Go)"
 	@echo "  bpf         - 仅编译 BPF 程序"
 	@echo "  web         - 编译 Next.js 前端"
+	@echo "  web-export  - 静态导出前端 (用于 Go 内嵌)"
 	@echo "  web-dev     - 启动前端开发服务器"
 	@echo "  go          - 仅编译 Go 程序"
 	@echo "  go-only     - 快速编译 Go（不检查依赖）"

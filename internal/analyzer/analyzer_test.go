@@ -8,8 +8,8 @@ import (
   "testing"
   "time"
 
-  "github.com/eunomia-bpf/agentsight/internal/analyzer"
-  "github.com/eunomia-bpf/agentsight/internal/core"
+  "github.com/haolipeng/LLM-Scope/internal/analyzer"
+  "github.com/haolipeng/LLM-Scope/internal/core"
 )
 
 func loadEvent(t *testing.T, name string) *core.Event {

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eunomia-bpf/agentsight/internal/core"
+	"github.com/haolipeng/LLM-Scope/internal/core"
 )
 
 // SSEMerger merges SSE fragments into a single event.

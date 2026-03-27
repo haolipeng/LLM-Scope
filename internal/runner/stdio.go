@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/eunomia-bpf/agentsight/internal/core"
+	"github.com/haolipeng/LLM-Scope/internal/core"
 )
 
 // StdioConfig configures the stdio runner.

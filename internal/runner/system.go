@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eunomia-bpf/agentsight/internal/core"
+	"github.com/haolipeng/LLM-Scope/internal/core"
 )
 
 // SystemConfig controls /proc sampling.

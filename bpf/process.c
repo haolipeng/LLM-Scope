@@ -238,7 +238,7 @@ static bool should_rate_limit_file(const struct event *e, uint64_t timestamp_ns,
 static void print_file_open_event(const struct event *e, uint64_t timestamp_ns, uint32_t count, const char *extra_fields)
 {
 	printf("{");
-	printf("\"timestamp\":%llu,", timestamp_ns);
+	printf("\"timestamp\":%llu,", (unsigned long long)timestamp_ns);
 	printf("\"event\":\"FILE_OPEN\",");
 	printf("\"comm\":\"%s\",", e->comm);
 	printf("\"pid\":%d,", e->pid);
@@ -493,14 +493,14 @@ static int handle_event(void *ctx, void *data, size_t data_sz)
 				}
 
 				printf("{");
-				printf("\"timestamp\":%llu,", timestamp_ns);
+				printf("\"timestamp\":%llu,", (unsigned long long)timestamp_ns);
 				printf("\"event\":\"EXIT\",");
 				printf("\"comm\":\"%s\",", e->comm);
 				printf("\"pid\":%d,", e->pid);
 				printf("\"ppid\":%d", e->ppid);
 				printf(",\"exit_code\":%u", e->exit_code);
 				if (e->duration_ns)
-					printf(",\"duration_ms\":%llu", e->duration_ns / 1000000);
+					printf(",\"duration_ms\":%llu", (unsigned long long)(e->duration_ns / 1000000));
 
 				// Check if this PID has pending rate limit warning
 				bool add_warning = false;
@@ -528,7 +528,7 @@ static int handle_event(void *ctx, void *data, size_t data_sz)
 
 					// Report the EXEC event
 					printf("{");
-					printf("\"timestamp\":%llu,", timestamp_ns);
+					printf("\"timestamp\":%llu,", (unsigned long long)timestamp_ns);
 					printf("\"event\":\"EXEC\",");
 					printf("\"comm\":\"%s\",", e->comm);
 					printf("\"pid\":%d,", e->pid);
@@ -547,7 +547,7 @@ static int handle_event(void *ctx, void *data, size_t data_sz)
 					}
 
 					printf("{");
-					printf("\"timestamp\":%llu,", timestamp_ns);
+					printf("\"timestamp\":%llu,", (unsigned long long)timestamp_ns);
 					printf("\"event\":\"EXEC\",");
 					printf("\"comm\":\"%s\",", e->comm);
 					printf("\"pid\":%d,", e->pid);
@@ -567,7 +567,7 @@ static int handle_event(void *ctx, void *data, size_t data_sz)
 			}
 
 			printf("{");
-			printf("\"timestamp\":%llu,", timestamp_ns);
+			printf("\"timestamp\":%llu,", (unsigned long long)timestamp_ns);
 			printf("\"event\":\"BASH_READLINE\",");
 			printf("\"comm\":\"%s\",", e->comm);
 			printf("\"pid\":%d,", e->pid);
@@ -605,7 +605,7 @@ static int handle_event(void *ctx, void *data, size_t data_sz)
 
 				// Report the FILE_DELETE event
 				printf("{");
-				printf("\"timestamp\":%llu,", timestamp_ns);
+				printf("\"timestamp\":%llu,", (unsigned long long)timestamp_ns);
 				printf("\"event\":\"FILE_DELETE\",");
 				printf("\"comm\":\"%s\",", e->comm);
 				printf("\"pid\":%d,", e->pid);
@@ -741,7 +741,7 @@ static int handle_event(void *ctx, void *data, size_t data_sz)
 		default:
 			// For unknown events, always report immediately
 			printf("{");
-			printf("\"timestamp\":%llu,", timestamp_ns);
+			printf("\"timestamp\":%llu,", (unsigned long long)timestamp_ns);
 			printf("\"event\":\"UNKNOWN\",");
 			printf("\"event_type\":%d", e->type);
 			printf("}\n");

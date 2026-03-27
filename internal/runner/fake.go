@@ -7,7 +7,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/eunomia-bpf/agentsight/internal/core"
+	"github.com/haolipeng/LLM-Scope/internal/core"
 )
 
 // FakeRunner generates simulated SSL request/response event pairs for testing.

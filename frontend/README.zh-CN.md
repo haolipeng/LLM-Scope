@@ -56,7 +56,7 @@ AgentSight 前端提供以下数据的直观可视化：
 
 ```bash
 # 克隆仓库
-git clone https://github.com/eunomia-bpf/agentsight.git --recursive
+git clone https://github.com/haolipeng/LLM-Scope.git --recursive
 cd agentsight/frontend
 
 # 安装依赖
