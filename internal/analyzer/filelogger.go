@@ -1,6 +1,7 @@
 package analyzer
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -20,6 +21,8 @@ type FileLogger struct {
 	checkInterval int
 	eventCount    int
 	mu            sync.Mutex
+	file          *os.File
+	writer        *bufio.Writer
 }
 
 func NewFileLogger(path string, rotate bool, maxSizeMB int) *FileLogger {
@@ -51,6 +54,7 @@ func (f *FileLogger) Process(ctx context.Context, in <-chan *core.Event) <-chan 
 
 	go func() {
 		defer close(out)
+		defer f.closeFile()
 
 		for {
 			select {
@@ -71,6 +75,33 @@ func (f *FileLogger) Process(ctx context.Context, in <-chan *core.Event) <-chan 
 	return out
 }
 
+func (f *FileLogger) openFile() error {
+	file, err := os.OpenFile(f.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	f.file = file
+	f.writer = bufio.NewWriterSize(file, 64*1024)
+	return nil
+}
+
+func (f *FileLogger) closeFile() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.flushAndClose()
+}
+
+func (f *FileLogger) flushAndClose() {
+	if f.writer != nil {
+		_ = f.writer.Flush()
+		f.writer = nil
+	}
+	if f.file != nil {
+		_ = f.file.Close()
+		f.file = nil
+	}
+}
+
 func (f *FileLogger) writeEvent(event *core.Event) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -80,12 +111,12 @@ func (f *FileLogger) writeEvent(event *core.Event) {
 		f.maybeRotate()
 	}
 
-	file, err := os.OpenFile(f.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "file logger: %v\n", err)
-		return
+	if f.file == nil {
+		if err := f.openFile(); err != nil {
+			fmt.Fprintf(os.Stderr, "file logger: %v\n", err)
+			return
+		}
 	}
-	defer file.Close()
 
 	payload, err := json.Marshal(event)
 	if err != nil {
@@ -94,7 +125,7 @@ func (f *FileLogger) writeEvent(event *core.Event) {
 	}
 
 	payload = normalizeBinaryData(payload)
-	_, _ = file.Write(append(payload, '\n'))
+	_, _ = f.writer.Write(append(payload, '\n'))
 }
 
 func (f *FileLogger) maybeRotate() {
@@ -106,6 +137,9 @@ func (f *FileLogger) maybeRotate() {
 	if info.Size() <= int64(f.maxSizeMB)*1024*1024 {
 		return
 	}
+
+	// Flush and close current file before rotating
+	f.flushAndClose()
 
 	// Chain rotation: .N-1 → .N, ..., .1 → .2, current → .1
 	// Remove the oldest file if it exceeds maxFiles
@@ -123,6 +157,11 @@ func (f *FileLogger) maybeRotate() {
 	rotated := fmt.Sprintf("%s.1", f.path)
 	if err := os.Rename(f.path, rotated); err != nil {
 		log.Printf("file logger: rotate error: %v", err)
+	}
+
+	// Reopen file after rotation
+	if err := f.openFile(); err != nil {
+		fmt.Fprintf(os.Stderr, "file logger: reopen after rotate: %v\n", err)
 	}
 }
 

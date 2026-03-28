@@ -403,6 +403,9 @@ func cleanChunkedContent(content string) string {
 			continue
 		}
 		if isHex(line) {
+			if line == "0" {
+				break
+			}
 			if i+1 < len(lines) {
 				parts = append(parts, lines[i+1])
 				i++

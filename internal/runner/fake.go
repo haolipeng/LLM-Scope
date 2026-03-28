@@ -81,7 +81,7 @@ func (r *FakeRunner) Stop() error {
 }
 
 func (r *FakeRunner) generateRequest(index int) *core.Event {
-	timestamp := time.Now().UnixNano()
+	timestamp := int64(getBootTimeNs())
 	pid := uint32(1000 + rand.Intn(9000))
 	tid := uint64(pid) + uint64(rand.Intn(100))
 
@@ -130,7 +130,7 @@ func (r *FakeRunner) generateRequest(index int) *core.Event {
 }
 
 func (r *FakeRunner) generateResponse(index int) *core.Event {
-	timestamp := time.Now().UnixNano()
+	timestamp := int64(getBootTimeNs())
 	pid := uint32(1000 + rand.Intn(9000))
 	tid := uint64(pid) + uint64(rand.Intn(100))
 
