@@ -22,7 +22,7 @@ var (
 )
 
 var sslCmd = &cobra.Command{
-	Use:   "ssl [-- EBPF_ARGS]",
+	Use:   "ssl",
 	Short: "监控 SSL/TLS 流量",
 	Long:  "捕获应用程序的 SSL/TLS 加密流量，获取解密后的明文数据",
 	Run:   runSSL,
@@ -54,7 +54,7 @@ func runSSL(cmd *cobra.Command, args []string) {
 	}()
 
 	sslRunner := runner.NewSSLRunner(runner.SSLConfig{
-		Args:       args,
+		OpenSSL:    true,
 		BinaryPath: binaryPath,
 	})
 

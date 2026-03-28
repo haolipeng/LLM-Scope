@@ -132,3 +132,6 @@ int trace_exit_write(struct trace_event_raw_sys_exit *ctx)
 }
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
+
+/* Force BTF emission for stdiocap_event_t so bpf2go can generate Go types */
+struct stdiocap_event_t *unused_stdiocap_event __attribute__((unused));

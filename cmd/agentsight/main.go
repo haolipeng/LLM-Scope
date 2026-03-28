@@ -4,6 +4,8 @@ import (
     "fmt"
     "os"
 
+    "github.com/haolipeng/LLM-Scope/frontend"
+    agentsightserver "github.com/haolipeng/LLM-Scope/internal/server"
     "github.com/spf13/cobra"
     "github.com/spf13/viper"
 )
@@ -25,6 +27,9 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
+    // Register embedded frontend assets
+    agentsightserver.SetEmbeddedFrontend(frontend.DistFS)
+
     cobra.OnInitialize(initConfig)
 
     rootCmd.PersistentFlags().BoolVar(&server, "server", false, "启动 Web 服务器")

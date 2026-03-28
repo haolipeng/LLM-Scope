@@ -8,6 +8,9 @@
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
+/* Force BTF emission for struct event so bpf2go can generate Go types */
+struct event *unused_event __attribute__((unused));
+
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 8192);
@@ -22,8 +25,8 @@ struct {
 
 const volatile unsigned long long min_duration_ns = 0;
 
-/* Bash readline uretprobe handler */
-SEC("uretprobe//usr/bin/bash:readline")
+/* Bash readline uretprobe handler - attached manually from Go side */
+SEC("uretprobe/bash_readline")
 int BPF_URETPROBE(bash_readline, const void *ret)
 {
 	struct event *e;

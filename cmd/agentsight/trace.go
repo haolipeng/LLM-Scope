@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/haolipeng/LLM-Scope/internal/analyzer"
@@ -172,10 +173,16 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 	var runners []runner.Runner
 
 	if cfg.SSL {
-		sslArgs := buildSSLArgs(cfg)
-		sslRunner := runner.NewSSLRunner(runner.SSLConfig{
-			Args: sslArgs,
-		})
+		sslConfig := runner.SSLConfig{
+			PID:        cfg.PID,
+			UID:        cfg.SSLUID,
+			Comm:       cfg.Comm,
+			BinaryPath: cfg.BinaryPath,
+			OpenSSL:    true,
+			Handshake:  cfg.SSLHandshake,
+		}
+
+		sslRunner := runner.NewSSLRunner(sslConfig)
 
 		sslAnalyzers := []analyzer.Analyzer{}
 		if len(cfg.SSLFilter) > 0 {
@@ -202,8 +209,16 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 	}
 
 	if cfg.Process {
-		procArgs := buildProcessArgs(cfg)
-		procRunner := runner.NewProcessRunner(runner.ProcessConfig{Args: procArgs})
+		procConfig := runner.ProcessConfig{
+			MinDurationMs: int64(cfg.Duration),
+			PID:           cfg.PID,
+			FilterMode:    cfg.Mode,
+		}
+		if cfg.Comm != "" {
+			procConfig.Commands = splitComm(cfg.Comm)
+		}
+
+		procRunner := runner.NewProcessRunner(procConfig)
 		events, err := procRunner.Run(ctx)
 		if err != nil {
 			cmd.PrintErrf("启动进程监控失败: %v\n", err)
@@ -281,39 +296,14 @@ func startServer(hub *agentsightserver.EventHub, port int) {
 	}()
 }
 
-func buildSSLArgs(cfg TraceConfig) []string {
-	var args []string
-	if cfg.PID != 0 {
-		args = append(args, "-p", fmt.Sprintf("%d", cfg.PID))
+// splitComm splits a comma-separated command list into a string slice.
+func splitComm(comm string) []string {
+	var result []string
+	for _, s := range strings.Split(comm, ",") {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			result = append(result, s)
+		}
 	}
-	if cfg.SSLUID != 0 {
-		args = append(args, "-u", fmt.Sprintf("%d", cfg.SSLUID))
-	}
-	if cfg.Comm != "" && cfg.BinaryPath == "" {
-		args = append(args, "-c", cfg.Comm)
-	}
-	if cfg.SSLHandshake {
-		args = append(args, "--handshake")
-	}
-	if cfg.BinaryPath != "" {
-		args = append(args, "--binary-path", cfg.BinaryPath)
-	}
-	return args
-}
-
-func buildProcessArgs(cfg TraceConfig) []string {
-	var args []string
-	if cfg.Comm != "" {
-		args = append(args, "-c", cfg.Comm)
-	}
-	if cfg.PID != 0 {
-		args = append(args, "-p", fmt.Sprintf("%d", cfg.PID))
-	}
-	if cfg.Duration > 0 {
-		args = append(args, "-d", fmt.Sprintf("%d", cfg.Duration))
-	}
-	if cfg.Mode > 0 {
-		args = append(args, "-m", fmt.Sprintf("%d", cfg.Mode))
-	}
-	return args
+	return result
 }

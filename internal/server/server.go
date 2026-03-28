@@ -1,18 +1,17 @@
 package server
 
 import (
+	"io/fs"
 	"net/http"
 	"path"
 	"strings"
-
-	iofs "io/fs"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
 // SetupRouter wires API routes and static assets.
-func SetupRouter(webAssets iofs.FS, eventStream *EventHub) *gin.Engine {
+func SetupRouter(webAssets fs.FS, eventStream *EventHub) *gin.Engine {
 	r := gin.Default()
 	r.Use(cors.Default())
 
@@ -25,15 +24,7 @@ func SetupRouter(webAssets iofs.FS, eventStream *EventHub) *gin.Engine {
 
 	// Only serve static files when embedded assets are available
 	if webAssets != nil {
-		assets := webAssets
-		if sub, err := iofs.Sub(webAssets, "web/dist"); err == nil {
-			// Verify the sub-directory actually exists before using it
-			if f, ferr := sub.Open("."); ferr == nil {
-				f.Close()
-				assets = sub
-			}
-		}
-		fileServer := http.FileServer(http.FS(assets))
+		fileServer := http.FileServer(http.FS(webAssets))
 
 		r.NoRoute(func(c *gin.Context) {
 			if strings.HasPrefix(c.Request.URL.Path, "/api") {
@@ -49,7 +40,7 @@ func SetupRouter(webAssets iofs.FS, eventStream *EventHub) *gin.Engine {
 				return
 			}
 
-			file, err := assets.Open(reqPath)
+			file, err := webAssets.Open(reqPath)
 			if err != nil {
 				c.Request.URL.Path = "/"
 				fileServer.ServeHTTP(c.Writer, c.Request)

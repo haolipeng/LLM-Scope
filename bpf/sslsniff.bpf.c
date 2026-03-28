@@ -367,3 +367,6 @@ int BPF_URETPROBE(probe_SSL_do_handshake_exit) {
 }
 
 char LICENSE[] SEC("license") = "GPL";
+
+/* Force BTF emission for probe_SSL_data_t so bpf2go can generate Go types */
+struct probe_SSL_data_t *unused_ssl_data __attribute__((unused));
