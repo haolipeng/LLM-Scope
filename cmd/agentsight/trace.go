@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"os"
@@ -33,6 +34,7 @@ type OutputConfig struct {
 	Quiet      bool
 	RotateLogs bool
 	MaxLogSize int
+	DuckDBPath string // DuckDB 文件路径，空则不启用
 }
 
 // TraceSSLConfig SSL 监控专用配置
@@ -103,6 +105,7 @@ var (
 	traceStdioComm      string
 	traceStdioAllFDs    bool
 	traceStdioMaxBytes  int
+	traceDuckDBPath     string
 )
 
 var traceCmd = &cobra.Command{
@@ -135,6 +138,7 @@ func init() {
 	traceCmd.Flags().StringVar(&traceStdioComm, "stdio-comm", "", "stdio 进程名过滤")
 	traceCmd.Flags().BoolVar(&traceStdioAllFDs, "stdio-all-fds", false, "捕获所有 FD")
 	traceCmd.Flags().IntVar(&traceStdioMaxBytes, "stdio-max-bytes", 8192, "stdio 每事件最大字节数")
+	traceCmd.Flags().StringVar(&traceDuckDBPath, "duckdb-path", "", "DuckDB 数据库文件路径（空则不启用）")
 }
 
 // runTrace 从命令行标志构建 TraceConfig 并启动综合监控
@@ -176,6 +180,7 @@ func runTrace(cmd *cobra.Command, _ []string) {
 			Quiet:      quiet,
 			RotateLogs: rotateLogs,
 			MaxLogSize: maxLogSize,
+			DuckDBPath: traceDuckDBPath,
 		},
 	}
 	executeTrace(cmd, cfg)
@@ -297,16 +302,30 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 	}
 	merged := pipelinestream.MergeStreams(ctx, append(streams, combinedStream)...)
 
+	// DuckDB sink（在 server 之前创建，以便传递 DB 给 analytics API）
+	var analyticsDB *sql.DB
+	var sinks []pipelinetypes.Sink
+	if cfg.Output.DuckDBPath != "" {
+		duckdbSink, err := interfacesink.NewDuckDBSink(interfacesink.DuckDBConfig{
+			DBPath: cfg.Output.DuckDBPath,
+		})
+		if err != nil {
+			cmd.PrintErrf("启动 DuckDB 失败: %v\n", err)
+			os.Exit(1)
+		}
+		sinks = append(sinks, duckdbSink)
+		analyticsDB = duckdbSink.DB()
+	}
+
 	eventHub := agentsightserver.NewEventHub(cfg.Output.LogFile)
 	if cfg.Output.Server {
-		startServer(ctx, eventHub, cfg.Output.ServerPort)
+		startServer(ctx, eventHub, cfg.Output.ServerPort, analyticsDB)
 	}
 
 	// 全局处理管道：transform + sinks
 	var transforms []pipelinetypes.Analyzer
 	transforms = append(transforms, pipelinetransforms.NewToolCallAggregator())
 
-	var sinks []pipelinetypes.Sink
 	if cfg.Output.LogFile != "" {
 		sinks = append(sinks, interfacesink.NewFileLogger(cfg.Output.LogFile, cfg.Output.RotateLogs, cfg.Output.MaxLogSize))
 	}
@@ -324,9 +343,9 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 }
 
 // startServer 启动 HTTP 服务器并注册优雅关闭
-func startServer(ctx context.Context, hub *agentsightserver.EventHub, port int) {
+func startServer(ctx context.Context, hub *agentsightserver.EventHub, port int, analyticsDB *sql.DB) {
 	assets := agentsightserver.WebAssets()
-	router := agentsightserver.SetupRouter(assets, hub)
+	router := agentsightserver.SetupRouter(assets, hub, analyticsDB)
 	addr := fmt.Sprintf(":%d", port)
 
 	srv := &http.Server{

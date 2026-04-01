@@ -11,6 +11,7 @@ var (
 	recordRotate     bool
 	recordMaxSize    int
 	recordServerPort int
+	recordDuckDBPath string
 )
 
 var recordCmd = &cobra.Command{
@@ -28,6 +29,7 @@ func init() {
 	recordCmd.Flags().BoolVar(&recordRotate, "rotate-logs", true, "日志轮转")
 	recordCmd.Flags().IntVar(&recordMaxSize, "max-log-size", 10, "最大日志大小(MB)")
 	recordCmd.Flags().IntVar(&recordServerPort, "server-port", 7395, "Web 端口")
+	recordCmd.Flags().StringVar(&recordDuckDBPath, "duckdb-path", "agentsight.duckdb", "DuckDB 数据库文件路径")
 
 	_ = recordCmd.MarkFlagRequired("comm")
 }
@@ -64,6 +66,7 @@ func runRecord(cmd *cobra.Command, _ []string) {
 			MaxLogSize: recordMaxSize,
 			Server:     true,
 			ServerPort: recordServerPort,
+			DuckDBPath: recordDuckDBPath,
 		},
 	}
 	executeTrace(cmd, cfg)

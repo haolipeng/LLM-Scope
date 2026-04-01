@@ -48,7 +48,7 @@ eBPF 内核级采集的原始系统调用事件：
 - **工具调用耗时分布**：`duration_ms` 的 P50/P95/P99，识别慢调用
 - **工具调用成功率**：`status` 字段（success/timeout），失败原因 `reason` 分析
 - **进程派生树**：通过 `EXEC` 的 `pid/ppid` 重建完整的进程树，观察 Agent 的命令执行链路
-- **进��生命周期**：`EXEC → EXIT` 配对，分析 `duration_ms` 和 `exit_code`
+- **进程生命周期**：`EXEC → EXIT` 配对，分析 `duration_ms` 和 `exit_code`
 
 ### 2. 资源消耗分析
 

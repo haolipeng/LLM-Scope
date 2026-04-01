@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"database/sql"
 	"io/fs"
 	"net/http"
 	"path"
@@ -11,7 +12,7 @@ import (
 )
 
 // SetupRouter wires API routes and static assets.
-func SetupRouter(webAssets fs.FS, eventStream *EventHub) *gin.Engine {
+func SetupRouter(webAssets fs.FS, eventStream *EventHub, analyticsDB *sql.DB) *gin.Engine {
 	r := gin.Default()
 	r.Use(cors.Default())
 
@@ -20,6 +21,11 @@ func SetupRouter(webAssets fs.FS, eventStream *EventHub) *gin.Engine {
 		api.GET("/events", getEvents(eventStream))
 		api.GET("/events/stream", streamEvents(eventStream))
 		api.GET("/assets", listAssets(webAssets))
+	}
+
+	// Analytics routes (only when DuckDB is available)
+	if analyticsDB != nil {
+		registerAnalyticsRoutes(api, analyticsDB)
 	}
 
 	// Only serve static files when embedded assets are available

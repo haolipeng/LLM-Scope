@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"sync"
 
 	pipelinetypes "github.com/haolipeng/LLM-Scope/internal/pipeline/types"
 	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
@@ -30,9 +31,14 @@ func (s sinkTap) Process(ctx context.Context, in <-chan *runtimeevent.Event) <-c
 		sinkChans = append(sinkChans, make(chan *runtimeevent.Event, 100))
 	}
 
+	var wg sync.WaitGroup
 	for i, sink := range s.sinks {
 		ch := sinkChans[i]
-		go sink.Consume(ctx, ch)
+		wg.Add(1)
+		go func(sk pipelinetypes.Sink, c <-chan *runtimeevent.Event) {
+			defer wg.Done()
+			sk.Consume(ctx, c)
+		}(sink, ch)
 	}
 
 	out := make(chan *runtimeevent.Event)
@@ -42,6 +48,7 @@ func (s sinkTap) Process(ctx context.Context, in <-chan *runtimeevent.Event) <-c
 			for _, ch := range sinkChans {
 				close(ch)
 			}
+			wg.Wait() // 等待所有 Sink 完成清理（含 DuckDB flush）
 		}()
 
 		for {
