@@ -1,13 +1,10 @@
 package main
 
 import (
-	"context"
 	"os"
-	"os/signal"
-	"syscall"
 
-	"github.com/haolipeng/LLM-Scope/internal/analyzer"
-	"github.com/haolipeng/LLM-Scope/internal/runner"
+	"github.com/haolipeng/LLM-Scope/internal/command"
+	systemcollector "github.com/haolipeng/LLM-Scope/internal/runtime/collectors/system"
 	"github.com/spf13/cobra"
 )
 
@@ -37,41 +34,24 @@ func init() {
 	systemCmd.Flags().IntVar(&systemMemThreshold, "memory-threshold", 0, "内存告警阈值MB")
 }
 
+// runSystem 启动系统资源监控并连接 analyzer 管道
 func runSystem(cmd *cobra.Command, _ []string) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		cancel()
-	}()
-
-	sysRunner := runner.NewSystemRunner(runner.SystemConfig{
-		IntervalSeconds: systemInterval,
-		PID:             systemPID,
-		Comm:            systemComm,
-		IncludeChildren: !systemNoChildren,
-		CPUThreshold:    systemCPUThreshold,
-		MemoryThreshold: systemMemThreshold,
+	err := command.Execute(command.ExecuteConfig{
+		Runner: systemcollector.New(systemcollector.Config{
+			IntervalSeconds: systemInterval,
+			PID:             systemPID,
+			Comm:            systemComm,
+			IncludeChildren: !systemNoChildren,
+			CPUThreshold:    systemCPUThreshold,
+			MemoryThreshold: systemMemThreshold,
+		}),
+		LogFile:    logFile,
+		RotateLogs: rotateLogs,
+		MaxLogSize: maxLogSize,
+		Quiet:      quiet,
 	})
-
-	var analyzers []analyzer.Analyzer
-	if logFile != "" {
-		analyzers = append(analyzers, analyzer.NewFileLogger(logFile, rotateLogs, maxLogSize))
-	}
-	if !quiet {
-		analyzers = append(analyzers, analyzer.NewOutput())
-	}
-
-	events, err := sysRunner.Run(ctx)
 	if err != nil {
 		cmd.PrintErrf("启动失败: %v\n", err)
 		os.Exit(1)
-	}
-
-	out := analyzer.Chain(analyzers...).Process(ctx, events)
-	for range out {
 	}
 }

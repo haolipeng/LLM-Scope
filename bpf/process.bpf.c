@@ -193,13 +193,13 @@ int trace_openat(struct trace_event_raw_sys_enter *ctx)
 	struct event *e;
 	pid_t pid;
 	char filepath[MAX_FILENAME_LEN];
-	int dfd, flags;
+	int flags;
 	const char *filename;
 
 	pid = bpf_get_current_pid_tgid() >> 32;
 
 	/* Get syscall arguments */
-	dfd = (int)ctx->args[0];
+	//dfd = (int)ctx->args[0];
 	filename = (const char *)ctx->args[1];
 	flags = (int)ctx->args[2];
 

@@ -2,19 +2,23 @@ package process
 
 import "github.com/cilium/ebpf"
 
-// Exported type aliases for the generated bpf2go types.
-type Objects = processObjects
-type Programs = processPrograms
-type Maps = processMaps
-type Variables = processVariables
-type Event = processEvent
+// 将 bpf2go 生成的类型以稳定的包级名称导出。
+type (
+	Objects   = processObjects
+	Programs  = processPrograms
+	Maps      = processMaps
+	Variables = processVariables
+	Event     = processEvent
+)
 
-// LoadSpec returns the embedded CollectionSpec for the process BPF program.
-func LoadSpec() (*ebpf.CollectionSpec, error) {
-	return loadProcess()
-}
+// LoadSpec 返回内嵌的 process BPF 程序 CollectionSpec。
+func LoadSpec() (*ebpf.CollectionSpec, error) { return loadProcess() }
 
-// LoadObjects loads BPF objects into the kernel.
-func LoadObjects(obj *Objects, opts *ebpf.CollectionOptions) error {
-	return loadProcessObjects(obj, opts)
-}
+// LoadObjects 将完整的 BPF 对象加载到内核中。
+func LoadObjects(obj *Objects, opts *ebpf.CollectionOptions) error { return loadProcessObjects(obj, opts) }
+
+// LoadPrograms 仅将程序对象加载到内核中。
+func LoadPrograms(progs *Programs, opts *ebpf.CollectionOptions) error { return loadProcessObjects(progs, opts) }
+
+// LoadMaps 仅将 map 对象加载到内核中。
+func LoadMaps(maps *Maps, opts *ebpf.CollectionOptions) error { return loadProcessObjects(maps, opts) }

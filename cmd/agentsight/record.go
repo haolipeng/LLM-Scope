@@ -32,30 +32,39 @@ func init() {
 	_ = recordCmd.MarkFlagRequired("comm")
 }
 
+// runRecord 用预设配置启动 AI Agent 录制会话
 func runRecord(cmd *cobra.Command, _ []string) {
 	cfg := TraceConfig{
-		SSL:            true,
-		Process:        true,
-		System:         true,
-		Comm:           recordComm,
-		PID:            0,
-		SSLUID:         0,
-		SSLFilter:      []string{"data=0\r\n\r\n|data.type=binary"},
-		SSLHandshake:   false,
-		SSLHTTP:        true,
-		SSLRaw:         false,
-		HTTPFilter:     []string{"request.path_prefix=/v1/rgstr | response.status_code=202 | request.method=HEAD | response.body="},
-		DisableAuth:    false,
-		Duration:       0,
-		Mode:           0,
-		SystemInterval: 10,
-		BinaryPath:     recordBinaryPath,
-		Quiet:          true,
-		LogFile:        recordLogFile,
-		RotateLogs:     recordRotate,
-		MaxLogSize:     recordMaxSize,
-		Server:         true,
-		ServerPort:     recordServerPort,
+		Comm: recordComm,
+		PID:  0,
+		SSL: TraceSSLConfig{
+			Enabled:     true,
+			UID:         0,
+			Filter:      []string{"data=0\r\n\r\n|data.type=binary"},
+			Handshake:   false,
+			HTTP:        true,
+			Raw:         false,
+			HTTPFilter:  []string{"request.path_prefix=/v1/rgstr | response.status_code=202 | request.method=HEAD | response.body="},
+			DisableAuth: false,
+			BinaryPath:  recordBinaryPath,
+		},
+		Process: TraceProcessConfig{
+			Enabled:  true,
+			Duration: 0,
+			Mode:     0,
+		},
+		System: TraceSystemConfig{
+			Enabled:  true,
+			Interval: 10,
+		},
+		Output: OutputConfig{
+			Quiet:      true,
+			LogFile:    recordLogFile,
+			RotateLogs: recordRotate,
+			MaxLogSize: recordMaxSize,
+			Server:     true,
+			ServerPort: recordServerPort,
+		},
 	}
 	executeTrace(cmd, cfg)
 }

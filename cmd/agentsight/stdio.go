@@ -1,13 +1,10 @@
 package main
 
 import (
-	"context"
 	"os"
-	"os/signal"
-	"syscall"
 
-	"github.com/haolipeng/LLM-Scope/internal/analyzer"
-	"github.com/haolipeng/LLM-Scope/internal/runner"
+	"github.com/haolipeng/LLM-Scope/internal/command"
+	stdiocollector "github.com/haolipeng/LLM-Scope/internal/runtime/collectors/stdio"
 	"github.com/spf13/cobra"
 )
 
@@ -38,40 +35,23 @@ func init() {
 	_ = stdioCmd.MarkFlagRequired("pid")
 }
 
+// runStdio 启动标准 I/O 捕获并连接 analyzer 管道
 func runStdio(cmd *cobra.Command, _ []string) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		cancel()
-	}()
-
-	stdioRunner := runner.NewStdioRunner(runner.StdioConfig{
-		PID:      stdioPID,
-		UID:      stdioUID,
-		Comm:     stdioComm,
-		AllFDs:   stdioAllFDs,
-		MaxBytes: stdioMaxBytes,
+	err := command.Execute(command.ExecuteConfig{
+		Runner: stdiocollector.New(stdiocollector.Config{
+			PID:      stdioPID,
+			UID:      stdioUID,
+			Comm:     stdioComm,
+			AllFDs:   stdioAllFDs,
+			MaxBytes: stdioMaxBytes,
+		}),
+		LogFile:    logFile,
+		RotateLogs: rotateLogs,
+		MaxLogSize: maxLogSize,
+		Quiet:      quiet,
 	})
-
-	var analyzers []analyzer.Analyzer
-	if logFile != "" {
-		analyzers = append(analyzers, analyzer.NewFileLogger(logFile, rotateLogs, maxLogSize))
-	}
-	if !quiet {
-		analyzers = append(analyzers, analyzer.NewOutput())
-	}
-
-	events, err := stdioRunner.Run(ctx)
 	if err != nil {
 		cmd.PrintErrf("启动失败: %v\n", err)
 		os.Exit(1)
-	}
-
-	out := analyzer.Chain(analyzers...).Process(ctx, events)
-	for range out {
 	}
 }

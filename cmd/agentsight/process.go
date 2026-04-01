@@ -1,13 +1,12 @@
 package main
 
 import (
-	"context"
 	"os"
-	"os/signal"
-	"syscall"
 
-	"github.com/haolipeng/LLM-Scope/internal/analyzer"
-	"github.com/haolipeng/LLM-Scope/internal/runner"
+	"github.com/haolipeng/LLM-Scope/internal/command"
+	pipelinetransforms "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
+	pipelinetypes "github.com/haolipeng/LLM-Scope/internal/pipeline/types"
+	processcollector "github.com/haolipeng/LLM-Scope/internal/runtime/collectors/process"
 	"github.com/spf13/cobra"
 )
 
@@ -33,18 +32,9 @@ func init() {
 	processCmd.Flags().IntVarP(&processPID, "pid", "p", 0, "PID 过滤")
 }
 
+// runProcess 启动进程监控 runner 并连接 analyzer 管道
 func runProcess(cmd *cobra.Command, args []string) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		cancel()
-	}()
-
-	config := runner.ProcessConfig{
+	config := processcollector.Config{
 		MinDurationMs: int64(processDuration),
 		PID:           processPID,
 		FilterMode:    processMode,
@@ -53,24 +43,16 @@ func runProcess(cmd *cobra.Command, args []string) {
 		config.Commands = splitComm(processComm)
 	}
 
-	procRunner := runner.NewProcessRunner(config)
-
-	var analyzers []analyzer.Analyzer
-	analyzers = append(analyzers, analyzer.NewToolCallAggregator())
-	if logFile != "" {
-		analyzers = append(analyzers, analyzer.NewFileLogger(logFile, rotateLogs, maxLogSize))
-	}
-	if !quiet {
-		analyzers = append(analyzers, analyzer.NewOutput())
-	}
-
-	events, err := procRunner.Run(ctx)
+	err := command.Execute(command.ExecuteConfig{
+		Runner:     processcollector.New(config),
+		Analyzers:  []pipelinetypes.Analyzer{pipelinetransforms.NewToolCallAggregator()},
+		LogFile:    logFile,
+		RotateLogs: rotateLogs,
+		MaxLogSize: maxLogSize,
+		Quiet:      quiet,
+	})
 	if err != nil {
 		cmd.PrintErrf("启动失败: %v\n", err)
 		os.Exit(1)
-	}
-
-	out := analyzer.Chain(analyzers...).Process(ctx, events)
-	for range out {
 	}
 }

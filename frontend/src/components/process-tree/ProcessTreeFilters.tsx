@@ -66,7 +66,7 @@ export function ProcessTreeFiltersComponent({
     });
   };
 
-  const hasActiveFilters = 
+  const hasActiveFilters =
     filters.eventTypes.length > 0 ||
     filters.models.length > 0 ||
     filters.sources.length > 0 ||
@@ -74,6 +74,25 @@ export function ProcessTreeFiltersComponent({
     filters.searchText.length > 0 ||
     filters.timeRange.start ||
     filters.timeRange.end;
+
+  // Check if a specific quick filter preset is currently active
+  const isPresetActive = (presetTypes: string[]) => {
+    if (filters.eventTypes.length !== presetTypes.length) return false;
+    return presetTypes.every(t => filters.eventTypes.includes(t));
+  };
+
+  const isAIOnly = isPresetActive(['prompt', 'response']);
+  const isFilesOnly = isPresetActive(['file']);
+  const isProcessesOnly = isPresetActive(['process']);
+
+  // Toggle preset: if already active, clear; otherwise apply
+  const togglePreset = (presetTypes: string[]) => {
+    if (isPresetActive(presetTypes)) {
+      updateFilters('eventTypes', []);
+    } else {
+      updateFilters('eventTypes', presetTypes);
+    }
+  };
 
   return (
     <div className="bg-gray-50 border-b border-gray-200">
@@ -96,20 +115,32 @@ export function ProcessTreeFiltersComponent({
           {/* Quick Filter Presets */}
           <div className="flex items-center space-x-2">
             <button
-              onClick={() => updateFilters('eventTypes', ['prompt', 'response'])}
-              className="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded hover:bg-purple-200"
+              onClick={() => togglePreset(['prompt', 'response'])}
+              className={`text-xs px-2 py-1 rounded font-medium transition-all ${
+                isAIOnly
+                  ? 'bg-purple-600 text-white ring-2 ring-purple-300 shadow-sm'
+                  : 'bg-purple-100 text-purple-800 hover:bg-purple-200'
+              }`}
             >
               AI Only
             </button>
             <button
-              onClick={() => updateFilters('eventTypes', ['file'])}
-              className="text-xs bg-cyan-100 text-cyan-800 px-2 py-1 rounded hover:bg-cyan-200"
+              onClick={() => togglePreset(['file'])}
+              className={`text-xs px-2 py-1 rounded font-medium transition-all ${
+                isFilesOnly
+                  ? 'bg-cyan-600 text-white ring-2 ring-cyan-300 shadow-sm'
+                  : 'bg-cyan-100 text-cyan-800 hover:bg-cyan-200'
+              }`}
             >
               Files Only
             </button>
             <button
-              onClick={() => updateFilters('eventTypes', ['process'])}
-              className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded hover:bg-green-200"
+              onClick={() => togglePreset(['process'])}
+              className={`text-xs px-2 py-1 rounded font-medium transition-all ${
+                isProcessesOnly
+                  ? 'bg-green-600 text-white ring-2 ring-green-300 shadow-sm'
+                  : 'bg-green-100 text-green-800 hover:bg-green-200'
+              }`}
             >
               Processes Only
             </button>

@@ -1,13 +1,12 @@
 package main
 
 import (
-	"context"
 	"os"
-	"os/signal"
-	"syscall"
 
-	"github.com/haolipeng/LLM-Scope/internal/analyzer"
-	"github.com/haolipeng/LLM-Scope/internal/runner"
+	"github.com/haolipeng/LLM-Scope/internal/command"
+	pipelinetransforms "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
+	pipelinetypes "github.com/haolipeng/LLM-Scope/internal/pipeline/types"
+	sslcollector "github.com/haolipeng/LLM-Scope/internal/runtime/collectors/ssl"
 	"github.com/spf13/cobra"
 )
 
@@ -40,56 +39,46 @@ func init() {
 	sslCmd.Flags().StringVar(&binaryPath, "binary-path", "", "SSL 库二进制路径")
 }
 
+// runSSL 启动 SSL/TLS 流量监控并连接分析管道
 func runSSL(cmd *cobra.Command, args []string) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		analyzer.PrintGlobalHTTPFilterMetrics()
-		analyzer.PrintGlobalSSLFilterMetrics()
-		cancel()
-	}()
-
-	sslRunner := runner.NewSSLRunner(runner.SSLConfig{
-		OpenSSL:    true,
-		BinaryPath: binaryPath,
-	})
-
-	var analyzers []analyzer.Analyzer
+	var analyzers []pipelinetypes.Analyzer
 	if len(sslFilters) > 0 {
-		analyzers = append(analyzers, analyzer.NewSSLFilter(sslFilters))
+		analyzers = append(analyzers, pipelinetransforms.NewSSLFilter(sslFilters))
 	}
 	if httpParser || sseMerge {
-		analyzers = append(analyzers, analyzer.NewSSEMerger())
+		analyzers = append(analyzers, pipelinetransforms.NewSSEMerger())
 	}
 	if httpParser {
-		analyzers = append(analyzers, analyzer.NewHTTPParser(httpRawData))
+		analyzers = append(analyzers, pipelinetransforms.NewHTTPParser(httpRawData))
 		if len(httpFilters) > 0 {
-			analyzers = append(analyzers, analyzer.NewHTTPFilter(httpFilters))
+			analyzers = append(analyzers, pipelinetransforms.NewHTTPFilter(httpFilters))
 		}
 		if !disableAuthRemoval {
-			analyzers = append(analyzers, analyzer.NewAuthRemover())
+			analyzers = append(analyzers, pipelinetransforms.NewAuthRemover())
 		}
 	}
-	analyzers = append(analyzers, analyzer.NewToolCallAggregator())
-	if logFile != "" {
-		analyzers = append(analyzers, analyzer.NewFileLogger(logFile, rotateLogs, maxLogSize))
-	}
-	if !quiet {
-		analyzers = append(analyzers, analyzer.NewOutput())
-	}
+	analyzers = append(analyzers, pipelinetransforms.NewToolCallAggregator())
 
-	events, err := sslRunner.Run(ctx)
+	err := command.Execute(command.ExecuteConfig{
+		Runner: sslcollector.New(sslcollector.Config{
+			OpenSSL:    true,
+			BinaryPath: binaryPath,
+		}),
+		Analyzers:  analyzers,
+		LogFile:    logFile,
+		RotateLogs: rotateLogs,
+		MaxLogSize: maxLogSize,
+		Quiet:      quiet,
+		OnSignal: func() {
+			for _, a := range analyzers {
+				if r, ok := a.(pipelinetypes.MetricsReporter); ok {
+					r.ReportMetrics()
+				}
+			}
+		},
+	})
 	if err != nil {
 		cmd.PrintErrf("启动失败: %v\n", err)
 		os.Exit(1)
-	}
-
-	out := analyzer.Chain(analyzers...).Process(ctx, events)
-
-	for range out {
 	}
 }
