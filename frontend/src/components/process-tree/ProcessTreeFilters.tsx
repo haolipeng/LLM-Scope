@@ -5,6 +5,7 @@
 
 import { useState } from 'react';
 import { FunnelIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import { useTranslation } from '@/i18n';
 
 export interface ProcessTreeFilters {
   eventTypes: string[];
@@ -38,6 +39,7 @@ export function ProcessTreeFiltersComponent({
   totalEvents,
   filteredEvents
 }: ProcessTreeFiltersProps) {
+  const { t } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(false);
 
   const updateFilters = (key: keyof ProcessTreeFilters, value: any) => {
@@ -104,10 +106,10 @@ export function ProcessTreeFiltersComponent({
             className="flex items-center space-x-2 text-sm font-medium text-gray-700 hover:text-gray-900"
           >
             <FunnelIcon className="h-4 w-4" />
-            <span>Filters</span>
+            <span>{t('processTree.filters')}</span>
             {hasActiveFilters && (
               <span className="bg-blue-100 text-blue-800 text-xs rounded-full px-2 py-1">
-                Active
+                {t('processTree.active')}
               </span>
             )}
           </button>
@@ -122,7 +124,7 @@ export function ProcessTreeFiltersComponent({
                   : 'bg-purple-100 text-purple-800 hover:bg-purple-200'
               }`}
             >
-              AI Only
+              {t('processTree.aiOnly')}
             </button>
             <button
               onClick={() => togglePreset(['file'])}
@@ -132,7 +134,7 @@ export function ProcessTreeFiltersComponent({
                   : 'bg-cyan-100 text-cyan-800 hover:bg-cyan-200'
               }`}
             >
-              Files Only
+              {t('processTree.filesOnly')}
             </button>
             <button
               onClick={() => togglePreset(['process'])}
@@ -142,12 +144,12 @@ export function ProcessTreeFiltersComponent({
                   : 'bg-green-100 text-green-800 hover:bg-green-200'
               }`}
             >
-              Processes Only
+              {t('processTree.processesOnly')}
             </button>
           </div>
           
           <div className="text-sm text-gray-500">
-            Showing {filteredEvents.toLocaleString()} of {totalEvents.toLocaleString()} events
+            {t('processTree.showing', { filtered: filteredEvents.toLocaleString(), total: totalEvents.toLocaleString() })}
           </div>
         </div>
 
@@ -157,7 +159,7 @@ export function ProcessTreeFiltersComponent({
             className="text-sm text-gray-500 hover:text-gray-700 flex items-center space-x-1"
           >
             <XMarkIcon className="h-4 w-4" />
-            <span>Clear all</span>
+            <span>{t('processTree.clearAll')}</span>
           </button>
         )}
       </div>
@@ -168,13 +170,13 @@ export function ProcessTreeFiltersComponent({
           {/* Search */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Search
+              {t('processTree.search')}
             </label>
             <input
               type="text"
               value={filters.searchText}
               onChange={(e) => updateFilters('searchText', e.target.value)}
-              placeholder="Search in content, models, commands..."
+              placeholder={t('processTree.searchPlaceholder')}
               className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -183,7 +185,7 @@ export function ProcessTreeFiltersComponent({
             {/* Event Types */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Event Types
+                {t('processTree.eventTypes')}
               </label>
               <div className="space-y-1 max-h-32 overflow-y-auto">
                 {availableOptions.eventTypes.map(type => (
@@ -203,7 +205,7 @@ export function ProcessTreeFiltersComponent({
             {/* Models */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                AI Models
+                {t('processTree.aiModels')}
               </label>
               <div className="space-y-1 max-h-32 overflow-y-auto">
                 {availableOptions.models.map(model => (
@@ -223,7 +225,7 @@ export function ProcessTreeFiltersComponent({
             {/* Sources */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Sources
+                {t('processTree.sources')}
               </label>
               <div className="space-y-1 max-h-32 overflow-y-auto">
                 {availableOptions.sources.map(source => (
@@ -243,7 +245,7 @@ export function ProcessTreeFiltersComponent({
             {/* Commands */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Commands
+                {t('processTree.commands')}
               </label>
               <div className="space-y-1 max-h-32 overflow-y-auto">
                 {availableOptions.commands.map(command => (
@@ -264,7 +266,7 @@ export function ProcessTreeFiltersComponent({
           {/* Time Range */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Time Range
+              {t('processTree.timeRange')}
             </label>
             <div className="flex space-x-2 items-center">
               <input
@@ -276,7 +278,7 @@ export function ProcessTreeFiltersComponent({
                 })}
                 className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
-              <span className="text-sm text-gray-500">to</span>
+              <span className="text-sm text-gray-500">{t('processTree.to')}</span>
               <input
                 type="datetime-local"
                 value={filters.timeRange.end ? new Date(filters.timeRange.end).toISOString().slice(0, 16) : ''}
