@@ -257,9 +257,8 @@ export function processMyEvents(events: Event[]): ProcessedEvent[] {
 The frontend connects to the collector's REST API:
 
 ```typescript
-// GET /api/events - Fetch all events
-// GET /api/events/stream - Server-sent events stream
-// POST /api/events - Upload event data
+// GET /api/analytics/timeline - Fetch events from DuckDB
+// GET /api/analytics/summary - Aggregated session summary
 ```
 
 ### Event Format

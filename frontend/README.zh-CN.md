@@ -259,9 +259,8 @@ export function processMyEvents(events: Event[]): ProcessedEvent[] {
 前端连接到 collector 的 REST API：
 
 ```typescript
-// GET /api/events - 获取所有事件
-// GET /api/events/stream - Server-Sent Events 流
-// POST /api/events - 上传事件数据
+// GET /api/analytics/timeline - 从 DuckDB 查询事件
+// GET /api/analytics/summary - 聚合会话摘要
 ```
 
 ### 事件格式

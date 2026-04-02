@@ -340,7 +340,7 @@ go test -v -run TestMyFunction ./internal/pipeline/transforms/
 - 检查 `AGENTSIGHT_FRONTEND_DIR` 开发时是否设置正确
 - 确认 `frontend/out/` 在构建后包含 `index.html`
 - 检查浏览器控制台是否有 JavaScript 错误
-- API 端点：`/api/events/stream`（SSE）或 `/api/events`（批量获取）
+- API 端点：`/api/analytics/timeline`（从 DuckDB 查询）
 
 ### 管道调试
 

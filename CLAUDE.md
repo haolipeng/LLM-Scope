@@ -71,14 +71,14 @@ eBPF Programs (kernel) → Ring Buffer → Go Collectors → Analyzer Chain → 
   - `core/` — Analyzer chain builder (`Chain()`)
   - `stream/` — CombinedRunner and MergeStreams for multi-source event merging
 - **`internal/interfaces/`** — Output layer:
-  - `http/` — Gin-based web server serving frontend assets and SSE `/api/events` endpoint
+  - `http/` — Gin-based web server serving frontend assets and `/api/analytics/*` endpoints
   - `sink/` — FileLogger and Output (console) sinks
 - **`cmd/agentsight/`** — CLI entry point with Cobra subcommands
 - **`frontend/`** — Next.js/React/TypeScript with Tailwind CSS; `embed.go` uses `//go:embed all:out` to embed static assets
 
 ### Data Flow
 
-Events flow through channels (`<-chan *runtimeevent.Event`). Each Runner produces a channel. Analyzers transform channels in sequence via `Chain().Process(ctx, in)`. CombinedRunner merges multiple Runner outputs. MergeStreams merges all streams into one. Sinks consume the final stream for side effects (logging, console output). The EventHub publishes events to SSE clients via WebSocket.
+Events flow through channels (`<-chan *runtimeevent.Event`). Each Runner produces a channel. Analyzers transform channels in sequence via `Chain().Process(ctx, in)`. CombinedRunner merges multiple Runner outputs. MergeStreams merges all streams into one. Sinks consume the final stream for side effects (logging, console output), and HTTP APIs read persisted data.
 
 ### Core Interfaces (internal/pipeline/types/types.go)
 

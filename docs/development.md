@@ -340,7 +340,7 @@ go test -v -run TestMyFunction ./internal/pipeline/transforms/
 - Check `AGENTSIGHT_FRONTEND_DIR` is set correctly for development
 - Verify `frontend/out/` contains `index.html` after building
 - Check browser console for JavaScript errors
-- API endpoint: `/api/events/stream` (SSE) or `/api/events` (batch)
+- API endpoint: `/api/analytics/timeline` (query from DuckDB)
 
 ### Pipeline Debugging
 
