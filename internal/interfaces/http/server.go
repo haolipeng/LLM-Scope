@@ -12,18 +12,16 @@ import (
 )
 
 // SetupRouter wires API routes and static assets.
-func SetupRouter(webAssets fs.FS, eventStream *EventHub, analyticsDB *sql.DB) *gin.Engine {
+func SetupRouter(webAssets fs.FS, analyticsDB *sql.DB) *gin.Engine {
 	r := gin.Default()
 	r.Use(cors.Default())
 
 	api := r.Group("/api")
 	{
-		api.GET("/events", getEvents(eventStream))
-		api.GET("/events/stream", streamEvents(eventStream))
 		api.GET("/assets", listAssets(webAssets))
 	}
 
-	// Analytics routes (only when DuckDB is available)
+	// Analytics routes (requires DuckDB)
 	if analyticsDB != nil {
 		registerAnalyticsRoutes(api, analyticsDB)
 	}

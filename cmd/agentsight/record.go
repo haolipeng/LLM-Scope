@@ -44,7 +44,6 @@ func runRecord(cmd *cobra.Command, _ []string) {
 			UID:         0,
 			Filter:      []string{"data=0\r\n\r\n|data.type=binary"},
 			Handshake:   false,
-			HTTP:        true,
 			Raw:         false,
 			HTTPFilter:  []string{"request.path_prefix=/v1/rgstr | response.status_code=202 | request.method=HEAD | response.body="},
 			DisableAuth: false,

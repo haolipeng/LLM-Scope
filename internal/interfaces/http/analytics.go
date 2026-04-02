@@ -237,7 +237,7 @@ func handleTimeline(db *sql.DB) gin.HandlerFunc {
 				id, session_id, event_time, source, pid, comm,
 				event_type, tool_event_type, tool_name, tool_status,
 				filepath, net_ip, net_port, full_command,
-				is_sensitive_file, is_dangerous_cmd
+				is_sensitive_file, is_dangerous_cmd, data_json
 			FROM events
 		`
 		var args []any

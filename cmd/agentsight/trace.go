@@ -43,7 +43,6 @@ type TraceSSLConfig struct {
 	UID         int
 	Filter      []string
 	Handshake   bool
-	HTTP        bool
 	Raw         bool
 	HTTPFilter  []string
 	DisableAuth bool
@@ -93,7 +92,6 @@ var (
 	traceSSLUID         int
 	traceSSLFilter      []string
 	traceSSLHandshake   bool
-	traceSSLHTTP        bool
 	traceSSLRaw         bool
 	traceHTTPFilter     []string
 	traceDisableAuth    bool
@@ -125,7 +123,6 @@ func init() {
 	traceCmd.Flags().IntVar(&traceSSLUID, "ssl-uid", 0, "SSL UID 过滤")
 	traceCmd.Flags().StringArrayVar(&traceSSLFilter, "ssl-filter", nil, "SSL 过滤表达式")
 	traceCmd.Flags().BoolVar(&traceSSLHandshake, "ssl-handshake", false, "显示握手事件")
-	traceCmd.Flags().BoolVar(&traceSSLHTTP, "ssl-http", true, "启用 HTTP 解析")
 	traceCmd.Flags().BoolVar(&traceSSLRaw, "ssl-raw-data", false, "包含原始数据")
 	traceCmd.Flags().StringArrayVar(&traceHTTPFilter, "http-filter", nil, "HTTP 过滤表达式")
 	traceCmd.Flags().BoolVar(&traceDisableAuth, "disable-auth-removal", false, "禁用敏感头移除")
@@ -151,7 +148,6 @@ func runTrace(cmd *cobra.Command, _ []string) {
 			UID:         traceSSLUID,
 			Filter:      traceSSLFilter,
 			Handshake:   traceSSLHandshake,
-			HTTP:        traceSSLHTTP,
 			Raw:         traceSSLRaw,
 			HTTPFilter:  traceHTTPFilter,
 			DisableAuth: traceDisableAuth,
@@ -236,15 +232,13 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 		if len(cfg.SSL.Filter) > 0 {
 			sslAnalyzers = append(sslAnalyzers, pipelinetransforms.NewSSLFilter(cfg.SSL.Filter))
 		}
-		if cfg.SSL.HTTP {
-			sslAnalyzers = append(sslAnalyzers, pipelinetransforms.NewSSEMerger())
-			sslAnalyzers = append(sslAnalyzers, pipelinetransforms.NewHTTPParser(cfg.SSL.Raw))
-			if len(cfg.SSL.HTTPFilter) > 0 {
-				sslAnalyzers = append(sslAnalyzers, pipelinetransforms.NewHTTPFilter(cfg.SSL.HTTPFilter))
-			}
-			if !cfg.SSL.DisableAuth {
-				sslAnalyzers = append(sslAnalyzers, pipelinetransforms.NewAuthRemover())
-			}
+		sslAnalyzers = append(sslAnalyzers, pipelinetransforms.NewSSEMerger())
+		sslAnalyzers = append(sslAnalyzers, pipelinetransforms.NewHTTPParser(cfg.SSL.Raw))
+		if len(cfg.SSL.HTTPFilter) > 0 {
+			sslAnalyzers = append(sslAnalyzers, pipelinetransforms.NewHTTPFilter(cfg.SSL.HTTPFilter))
+		}
+		if !cfg.SSL.DisableAuth {
+			sslAnalyzers = append(sslAnalyzers, pipelinetransforms.NewAuthRemover())
 		}
 
 		allAnalyzers = append(allAnalyzers, sslAnalyzers...)
@@ -317,9 +311,8 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 		analyticsDB = duckdbSink.DB()
 	}
 
-	eventHub := agentsightserver.NewEventHub(cfg.Output.LogFile)
 	if cfg.Output.Server {
-		startServer(ctx, eventHub, cfg.Output.ServerPort, analyticsDB)
+		startServer(ctx, cfg.Output.ServerPort, analyticsDB)
 	}
 
 	// 全局处理管道：transform + sinks
@@ -333,19 +326,15 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 		sinks = append(sinks, interfacesink.NewOutput())
 	}
 
-	// 消费全局管道输出，转发到 eventHub 供 WebSocket 推送
+	// 消费全局管道输出（无实时推送，仅由 sinks 处理与持久化）
 	p := pipeline.New().WithTransforms(transforms...).WithSinks(sinks...)
-	p.Drain(ctx, merged, func(event *runtimeevent.Event) {
-		if cfg.Output.Server {
-			eventHub.Publish(event)
-		}
-	})
+	p.Drain(ctx, merged, nil)
 }
 
 // startServer 启动 HTTP 服务器并注册优雅关闭
-func startServer(ctx context.Context, hub *agentsightserver.EventHub, port int, analyticsDB *sql.DB) {
+func startServer(ctx context.Context, port int, analyticsDB *sql.DB) {
 	assets := agentsightserver.WebAssets()
-	router := agentsightserver.SetupRouter(assets, hub, analyticsDB)
+	router := agentsightserver.SetupRouter(assets, analyticsDB)
 	addr := fmt.Sprintf(":%d", port)
 
 	srv := &http.Server{

@@ -3,7 +3,7 @@
 
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { LogView } from '@/components/LogView';
 import { TimelineView } from '@/components/TimelineView';
 import { ProcessTreeView } from '@/components/ProcessTreeView';
@@ -30,9 +30,6 @@ export default function Home() {
   const [error, setError] = useState<string>('');
   const [isParsed, setIsParsed] = useState(false);
   const [showUploadPanel, setShowUploadPanel] = useState(false);
-  const [streaming, setStreaming] = useState(false);
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const sseEventIndexRef = useRef(0);
 
   const parseLogContent = (content: string) => {
     if (!content.trim()) {
@@ -115,27 +112,54 @@ export default function Home() {
     setError('');
 
     try {
-      // Try Next.js proxy first, fallback to direct Go backend connection
       let response: Response;
       try {
-        response = await fetch('/api/events');
+        response = await fetch('/api/analytics/timeline?limit=10000');
       } catch {
-        response = await fetch(`${GO_BACKEND_URL}/api/events`);
+        response = await fetch(`${GO_BACKEND_URL}/api/analytics/timeline?limit=10000`);
       }
 
       if (!response.ok) {
         throw new Error(`Failed to fetch data: ${response.status} ${response.statusText}`);
       }
 
-      const content = await response.text();
+      const json = await response.json();
+      const rows: any[] = json.data || [];
 
-      if (!content.trim()) {
-        setError('No events captured yet. Make sure the Go backend is running with --log-file and there is activity to monitor.');
+      if (rows.length === 0) {
+        setError('No events captured yet. Make sure the Go backend is running with DuckDB enabled and there is activity to monitor.');
         return;
       }
 
-      setLogContent(content);
-      parseLogContent(content);
+      const parsedEvents: Event[] = rows.map((row, index) => {
+        const timestamp = row.event_time
+          ? new Date(row.event_time).getTime()
+          : Date.now();
+
+        let data = row.data_json;
+        if (typeof data === 'string') {
+          try { data = JSON.parse(data); } catch { /* keep as string */ }
+        }
+        if (!data || typeof data !== 'object') {
+          data = { ...row };
+        }
+
+        return {
+          id: row.id ? String(row.id) : `${row.source}-${timestamp}-${index}`,
+          timestamp,
+          source: row.source || 'unknown',
+          pid: row.pid || 0,
+          comm: row.comm || '',
+          data,
+        };
+      });
+
+      const sortedEvents = parsedEvents.sort((a, b) => a.timestamp - b.timestamp);
+      setEvents(sortedEvents);
+      setIsParsed(true);
+      setShowUploadPanel(false);
+
+      localStorage.setItem('agent-tracer-events', JSON.stringify(sortedEvents));
 
     } catch (err) {
       setError(`Failed to sync data: ${err instanceof Error ? err.message : 'Unknown error'}. Is the Go backend running on port 7395?`);
@@ -189,60 +213,6 @@ export default function Home() {
     localStorage.removeItem('agent-tracer-events');
   };
 
-  const startSSEStream = useCallback(() => {
-    if (eventSourceRef.current) return;
-
-    const es = new EventSource(`${GO_BACKEND_URL}/api/events/stream`);
-    eventSourceRef.current = es;
-    setStreaming(true);
-    sseEventIndexRef.current = 0;
-
-    es.onmessage = (msg) => {
-      try {
-        const raw = JSON.parse(msg.data);
-        const idx = sseEventIndexRef.current++;
-        let event: Event;
-        if (isGoEventFormat(raw)) {
-          event = adaptGoEvent(raw, idx);
-        } else {
-          event = raw as Event;
-          if (!event.id) {
-            event.id = `${event.source}-${event.timestamp}-${idx}`;
-          }
-        }
-        if (event.timestamp && event.source && event.data) {
-          setEvents(prev => [...prev, event].sort((a, b) => a.timestamp - b.timestamp));
-          setIsParsed(true);
-        }
-      } catch {
-        // skip malformed SSE messages
-      }
-    };
-
-    es.onerror = () => {
-      es.close();
-      eventSourceRef.current = null;
-      setStreaming(false);
-    };
-  }, []);
-
-  const stopSSEStream = useCallback(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
-    setStreaming(false);
-  }, []);
-
-  // Cleanup SSE on unmount
-  useEffect(() => {
-    return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-      }
-    };
-  }, []);
-
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -294,12 +264,6 @@ export default function Home() {
                   </div>
                 )}
 
-                {streaming && (
-                  <div className="flex items-center text-sm text-green-600">
-                    <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse mr-2"></div>
-                    {t('app.streaming')}
-                  </div>
-                )}
               </div>
 
               <div className="flex items-center space-x-4">
@@ -361,17 +325,6 @@ export default function Home() {
                   className="px-4 py-2 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-md transition-colors border border-blue-300 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {t('app.syncData')}
-                </button>
-
-                <button
-                  onClick={streaming ? stopSSEStream : startSSEStream}
-                  className={`px-4 py-2 text-sm rounded-md transition-colors border ${
-                    streaming
-                      ? 'text-orange-600 hover:text-orange-700 hover:bg-orange-50 border-orange-300'
-                      : 'text-green-600 hover:text-green-700 hover:bg-green-50 border-green-300'
-                  }`}
-                >
-                  {streaming ? t('app.stopStreaming') : t('app.startStreaming')}
                 </button>
 
                 <button
