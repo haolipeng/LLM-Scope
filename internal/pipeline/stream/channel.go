@@ -4,16 +4,16 @@ import (
 	"context"
 
 	pipelinetypes "github.com/haolipeng/LLM-Scope/internal/pipeline/types"
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
 // ChannelRunner 将已有事件流包装成一个 Runner。
 type ChannelRunner struct {
 	name   string
-	stream <-chan *runtimeevent.Event
+	stream <-chan *event.Event
 }
 
-func FromChannel(name string, stream <-chan *runtimeevent.Event) pipelinetypes.Runner {
+func FromChannel(name string, stream <-chan *event.Event) pipelinetypes.Runner {
 	return &ChannelRunner{name: name, stream: stream}
 }
 
@@ -25,8 +25,8 @@ func (c *ChannelRunner) Name() string {
 	return c.name
 }
 
-func (c *ChannelRunner) Run(ctx context.Context) (<-chan *runtimeevent.Event, error) {
-	out := make(chan *runtimeevent.Event)
+func (c *ChannelRunner) Run(ctx context.Context) (<-chan *event.Event, error) {
+	out := make(chan *event.Event)
 	go func() {
 		defer close(out)
 		for {

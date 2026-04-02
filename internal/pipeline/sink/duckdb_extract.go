@@ -2,26 +2,27 @@ package sink
 
 import (
 	"encoding/json"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
-// eventRow holds extracted column values for a single DuckDB INSERT.
-type eventRow struct {
-	// universal
+// ---------- Per-table row types ----------
+
+type baseRow struct {
 	sessionID     string
 	timestampNs   int64
 	timestampUnix int64
 	eventTime     time.Time
-	source        string
 	pid           uint32
 	comm          string
+	dataJSON      string
+}
 
-	// process
+type processRow struct {
+	baseRow
 	eventType   *string
 	ppid        *uint32
 	exitCode    *int32
@@ -36,8 +37,10 @@ type eventRow struct {
 	netFamily   *uint32
 	dirMode     *uint32
 	bashCommand *string
+}
 
-	// tool_call
+type toolCallRow struct {
+	baseRow
 	toolEventType *string
 	toolName      *string
 	toolStatus    *string
@@ -46,8 +49,11 @@ type eventRow struct {
 	toolKeyField  *string
 	toolArgsHash  *string
 	toolTID       *uint32
+	durationMs    *int64
+}
 
-	// system
+type systemRow struct {
+	baseRow
 	sysType       *string
 	cpuPercent    *float64
 	cpuCores      *uint32
@@ -56,73 +62,67 @@ type eventRow struct {
 	threadCount   *uint32
 	childrenCount *uint32
 	sysAlert      *bool
+}
 
-	// ssl
+type sslRow struct {
+	baseRow
 	sslFunction    *string
 	sslLen         *uint32
 	sslIsHandshake *bool
 	sslLatencyMs   *float64
 	sslTID         *uint32
+}
 
-	// http_parser
+type httpRow struct {
+	baseRow
 	httpMessageType *string
 	httpMethod      *string
 	httpPath        *string
 	httpStatusCode  *uint16
 	httpTotalSize   *uint32
 	httpTID         *uint32
+}
 
-	// sse_processor
+type sseRow struct {
+	baseRow
 	sseConnectionID *string
 	sseDurationNs   *int64
 	sseEventCount   *uint32
 	sseTotalSize    *uint32
-
-	// raw JSON
-	dataJSON string
-
-	// security
-	isSensitiveFile bool
-	isDangerousCmd  bool
 }
 
-// extractRow parses an Event into column values for the events table.
-func extractRow(event *runtimeevent.Event, sessionID string) eventRow {
-	row := eventRow{
+type securityRow struct {
+	baseRow
+	alertType     *string
+	riskLevel     *string
+	description   *string
+	sourceTable   *string
+	sourceEventID *uint64
+	evidenceJSON  *string
+}
+
+// ---------- Extraction functions ----------
+
+func extractBase(event *event.Event, sessionID string) baseRow {
+	return baseRow{
 		sessionID:     sessionID,
 		timestampNs:   event.TimestampNs,
 		timestampUnix: event.TimestampUnixMs,
 		eventTime:     event.Time(),
-		source:        event.Source,
 		pid:           event.PID,
 		comm:          event.Comm,
 		dataJSON:      string(event.Data),
 	}
+}
+
+func extractProcessRow(event *event.Event, sessionID string) processRow {
+	row := processRow{baseRow: extractBase(event, sessionID)}
 
 	var data map[string]interface{}
 	if err := json.Unmarshal(event.Data, &data); err != nil {
 		return row
 	}
 
-	switch event.Source {
-	case "process":
-		extractProcess(&row, data)
-	case "tool_call":
-		extractToolCall(&row, data)
-	case "system":
-		extractSystem(&row, data)
-	case "ssl":
-		extractSSL(&row, data)
-	case "http_parser":
-		extractHTTP(&row, data)
-	case "sse_processor":
-		extractSSE(&row, data)
-	}
-
-	return row
-}
-
-func extractProcess(row *eventRow, data map[string]interface{}) {
 	row.eventType = getStringPtr(data, "event")
 	row.ppid = getUint32Ptr(data, "ppid")
 	row.exitCode = getInt32Ptr(data, "exit_code")
@@ -152,19 +152,17 @@ func extractProcess(row *eventRow, data map[string]interface{}) {
 		row.bashCommand = getStringPtr(data, "command")
 	}
 
-	// security checks
-	if fp := row.filepath; fp != nil {
-		row.isSensitiveFile = isSensitivePath(*fp)
-	}
-	if fp2 := row.filepath2; fp2 != nil && !row.isSensitiveFile {
-		row.isSensitiveFile = isSensitivePath(*fp2)
-	}
-	if cmd := row.fullCommand; cmd != nil {
-		row.isDangerousCmd = isDangerousCommand(*cmd)
-	}
+	return row
 }
 
-func extractToolCall(row *eventRow, data map[string]interface{}) {
+func extractToolCallRow(event *event.Event, sessionID string) toolCallRow {
+	row := toolCallRow{baseRow: extractBase(event, sessionID)}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal(event.Data, &data); err != nil {
+		return row
+	}
+
 	row.toolEventType = getStringPtr(data, "event_type")
 	row.toolName = getStringPtr(data, "tool_name")
 	row.toolStatus = getStringPtr(data, "status")
@@ -175,12 +173,17 @@ func extractToolCall(row *eventRow, data map[string]interface{}) {
 	row.toolTID = getUint32Ptr(data, "tid")
 	row.durationMs = getInt64Ptr(data, "duration_ms")
 
-	if kf := row.toolKeyField; kf != nil {
-		row.isSensitiveFile = isSensitivePath(*kf)
-	}
+	return row
 }
 
-func extractSystem(row *eventRow, data map[string]interface{}) {
+func extractSystemRow(event *event.Event, sessionID string) systemRow {
+	row := systemRow{baseRow: extractBase(event, sessionID)}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal(event.Data, &data); err != nil {
+		return row
+	}
+
 	row.sysType = getStringPtr(data, "type")
 
 	if cpu, ok := data["cpu"].(map[string]interface{}); ok {
@@ -201,81 +204,90 @@ func extractSystem(row *eventRow, data map[string]interface{}) {
 	if alert, ok := data["alert"].(bool); ok {
 		row.sysAlert = &alert
 	}
+
+	return row
 }
 
-func extractSSL(row *eventRow, data map[string]interface{}) {
+func extractSSLRow(event *event.Event, sessionID string) sslRow {
+	row := sslRow{baseRow: extractBase(event, sessionID)}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal(event.Data, &data); err != nil {
+		return row
+	}
+
 	row.sslFunction = getStringPtr(data, "function")
 	row.sslLen = getUint32Ptr(data, "len")
 	row.sslIsHandshake = getBoolPtr(data, "is_handshake")
 	row.sslLatencyMs = getFloat64Ptr(data, "latency_ms")
 	row.sslTID = getUint32Ptr(data, "tid")
+
+	return row
 }
 
-func extractHTTP(row *eventRow, data map[string]interface{}) {
+func extractHTTPRow(event *event.Event, sessionID string) httpRow {
+	row := httpRow{baseRow: extractBase(event, sessionID)}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal(event.Data, &data); err != nil {
+		return row
+	}
+
 	row.httpMessageType = getStringPtr(data, "message_type")
 	row.httpMethod = getStringPtr(data, "method")
 	row.httpPath = getStringPtr(data, "path")
 	row.httpStatusCode = getUint16Ptr(data, "status_code")
 	row.httpTotalSize = getUint32Ptr(data, "total_size")
 	row.httpTID = getUint32Ptr(data, "tid")
+
+	return row
 }
 
-func extractSSE(row *eventRow, data map[string]interface{}) {
+func extractSSERow(event *event.Event, sessionID string) sseRow {
+	row := sseRow{baseRow: extractBase(event, sessionID)}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal(event.Data, &data); err != nil {
+		return row
+	}
+
 	row.sseConnectionID = getStringPtr(data, "connection_id")
 	row.sseDurationNs = getInt64Ptr(data, "duration_ns")
 	row.sseEventCount = getUint32Ptr(data, "event_count")
 	row.sseTotalSize = getUint32Ptr(data, "total_size")
+
+	return row
 }
 
-// --- Sensitive path / dangerous command detection ---
+func extractSecurityRow(event *event.Event, sessionID string) securityRow {
+	row := securityRow{baseRow: extractBase(event, sessionID)}
 
-var sensitivePathPatterns = []string{
-	"/etc/passwd",
-	"/etc/shadow",
-	"/etc/sudoers",
-	".env",
-	".ssh/",
-	"id_rsa",
-	"id_ed25519",
-	"credentials",
-	"secret",
-	".aws/",
-	".kube/config",
-	"/proc/self/",
-}
-
-func isSensitivePath(path string) bool {
-	lower := strings.ToLower(path)
-	for _, pattern := range sensitivePathPatterns {
-		if strings.Contains(lower, pattern) {
-			return true
-		}
+	var data map[string]interface{}
+	if err := json.Unmarshal(event.Data, &data); err != nil {
+		return row
 	}
-	return false
-}
 
-var dangerousCmdPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`\brm\s+(-[^\s]*)?-r`),
-	regexp.MustCompile(`\bchmod\s+777\b`),
-	regexp.MustCompile(`\bcurl\b.*\|\s*\bbash\b`),
-	regexp.MustCompile(`\bwget\b.*\|\s*\bbash\b`),
-	regexp.MustCompile(`\bmkfifo\b`),
-	regexp.MustCompile(`\bnc\s+-[^\s]*l`),
-	regexp.MustCompile(`/dev/tcp/`),
-	regexp.MustCompile(`\bdd\s+.*of=/dev/`),
-	regexp.MustCompile(`\b>\s*/etc/`),
-}
+	row.alertType = getStringPtr(data, "alert_type")
+	row.riskLevel = getStringPtr(data, "risk_level")
+	row.description = getStringPtr(data, "description")
+	row.sourceTable = getStringPtr(data, "source_table")
 
-func isDangerousCommand(cmd string) bool {
-	for _, re := range dangerousCmdPatterns {
-		if re.MatchString(cmd) {
-			return true
-		}
+	if eid, ok := data["source_event_id"].(float64); ok {
+		u := uint64(eid)
+		row.sourceEventID = &u
 	}
-	return false
+	if ej := getStringPtr(data, "evidence_json"); ej != nil {
+		row.evidenceJSON = ej
+	} else if ev, ok := data["evidence"]; ok {
+		b, _ := json.Marshal(ev)
+		s := string(b)
+		row.evidenceJSON = &s
+	}
+
+	return row
 }
 
-// --- JSON field helpers ---
+// ---------- JSON field helpers ----------
 
 func getString(m map[string]interface{}, key string) string {
 	v, ok := m[key]

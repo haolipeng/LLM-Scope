@@ -3,10 +3,10 @@ package main
 import (
 	"os"
 
-	"github.com/haolipeng/LLM-Scope/internal/command"
+	"github.com/haolipeng/LLM-Scope/internal/pipeline"
 	pipelinetransforms "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
 	pipelinetypes "github.com/haolipeng/LLM-Scope/internal/pipeline/types"
-	processcollector "github.com/haolipeng/LLM-Scope/internal/runtime/collectors/process"
+	processcollector "github.com/haolipeng/LLM-Scope/internal/collectors/process"
 	"github.com/spf13/cobra"
 )
 
@@ -43,7 +43,7 @@ func runProcess(cmd *cobra.Command, args []string) {
 		config.Commands = splitComm(processComm)
 	}
 
-	err := command.Execute(command.ExecuteConfig{
+	err := pipeline.Execute(pipeline.ExecuteConfig{
 		Runner:     processcollector.New(config),
 		Analyzers:  []pipelinetypes.Analyzer{pipelinetransforms.NewToolCallAggregator()},
 		LogFile:    logFile,

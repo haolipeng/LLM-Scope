@@ -12,9 +12,9 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
 
-	bpfprocess "github.com/haolipeng/LLM-Scope/internal/runtime/bpf/process"
-	runtimebase "github.com/haolipeng/LLM-Scope/internal/runtime/collectors/base"
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	bpfprocess "github.com/haolipeng/LLM-Scope/internal/bpf/process"
+	runtimebase "github.com/haolipeng/LLM-Scope/internal/collectors/base"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
 const (
@@ -102,7 +102,7 @@ func (r *Runner) ID() string   { return "process" }
 func (r *Runner) Name() string { return "process" }
 
 // Run 运行进程收集器
-func (r *Runner) Run(ctx context.Context) (<-chan *runtimeevent.Event, error) {
+func (r *Runner) Run(ctx context.Context) (<-chan *event.Event, error) {
 	if err := rlimit.RemoveMemlock(); err != nil {
 		log.Printf("[Process] warning: remove memlock: %v", err)
 	}
@@ -144,7 +144,7 @@ func (r *Runner) Run(ctx context.Context) (<-chan *runtimeevent.Event, error) {
 		return nil, err
 	}
 
-	out := make(chan *runtimeevent.Event, 100)
+	out := make(chan *event.Event, 100)
 	go r.ReadLoop(ctx, out, r.parseEvents)
 
 	return out, nil
@@ -175,7 +175,7 @@ func (r *Runner) attachProbes() {
 }
 
 // parseEvents 解析事件
-func (r *Runner) parseEvents(raw []byte) []*runtimeevent.Event {
+func (r *Runner) parseEvents(raw []byte) []*event.Event {
 	if len(raw) < minEventSize {
 		return nil
 	}
@@ -183,7 +183,7 @@ func (r *Runner) parseEvents(raw []byte) []*runtimeevent.Event {
 }
 
 // handleRawEvent 处理原始事件
-func (r *Runner) handleRawEvent(raw []byte) []*runtimeevent.Event {
+func (r *Runner) handleRawEvent(raw []byte) []*event.Event {
 	le := binary.LittleEndian
 
 	eventType := le.Uint32(raw[offType:])
@@ -218,8 +218,8 @@ func (r *Runner) handleRawEvent(raw []byte) []*runtimeevent.Event {
 }
 
 // handleProcessEvent 处理进程事件
-func (r *Runner) handleProcessEvent(pid, ppid int32, exitCode uint32, durationNs, timestampNs uint64, comm, fullCommand string, exitEvent bool, unionData []byte) []*runtimeevent.Event {
-	var events []*runtimeevent.Event
+func (r *Runner) handleProcessEvent(pid, ppid int32, exitCode uint32, durationNs, timestampNs uint64, comm, fullCommand string, exitEvent bool, unionData []byte) []*event.Event {
+	var events []*event.Event
 
 	if exitEvent {
 		isTracked := r.tracker.IsTracked(pid)
@@ -293,7 +293,7 @@ func (r *Runner) handleProcessEvent(pid, ppid int32, exitCode uint32, durationNs
 }
 
 // handleBashReadline 处理bash读写事件
-func (r *Runner) handleBashReadline(pid int32, timestampNs uint64, comm string, unionData []byte) []*runtimeevent.Event {
+func (r *Runner) handleBashReadline(pid int32, timestampNs uint64, comm string, unionData []byte) []*event.Event {
 	if !r.tracker.ShouldReportBashReadline(pid) {
 		return nil
 	}
@@ -305,11 +305,11 @@ func (r *Runner) handleBashReadline(pid int32, timestampNs uint64, comm string, 
 		"pid":       pid,
 		"command":   command,
 	}
-	return []*runtimeevent.Event{r.makeEvent(timestampNs, pid, comm, data)}
+	return []*event.Event{r.makeEvent(timestampNs, pid, comm, data)}
 }
 
 // handleFileOp 处理文件操作事件
-func (r *Runner) handleFileOp(pid int32, timestampNs uint64, comm string, unionData []byte) []*runtimeevent.Event {
+func (r *Runner) handleFileOp(pid int32, timestampNs uint64, comm string, unionData []byte) []*event.Event {
 	if !r.tracker.ShouldReportFileOps(pid) {
 		return nil
 	}
@@ -323,7 +323,7 @@ func (r *Runner) handleFileOp(pid int32, timestampNs uint64, comm string, unionD
 		return nil
 	}
 
-	var events []*runtimeevent.Event
+	var events []*event.Event
 	switch opType {
 	case fileOpOpen:
 		rl := r.rateLimiter.Check(pid, timestampNs)
@@ -375,7 +375,7 @@ func (r *Runner) handleFileOp(pid int32, timestampNs uint64, comm string, unionD
 }
 
 // handleCredChange 处理凭证变更事件
-func (r *Runner) handleCredChange(pid, ppid int32, timestampNs uint64, comm string, unionData []byte) []*runtimeevent.Event {
+func (r *Runner) handleCredChange(pid, ppid int32, timestampNs uint64, comm string, unionData []byte) []*event.Event {
 	if !r.tracker.ShouldReportFileOps(pid) {
 		return nil
 	}
@@ -412,11 +412,11 @@ func (r *Runner) handleCredChange(pid, ppid int32, timestampNs uint64, comm stri
 		"old":       oldCred,
 		"new":       newCred,
 	}
-	return []*runtimeevent.Event{r.makeEvent(timestampNs, pid, comm, data)}
+	return []*event.Event{r.makeEvent(timestampNs, pid, comm, data)}
 }
 
 // handleNetConnect 处理网络连接事件
-func (r *Runner) handleNetConnect(pid int32, timestampNs uint64, comm string, unionData []byte) []*runtimeevent.Event {
+func (r *Runner) handleNetConnect(pid int32, timestampNs uint64, comm string, unionData []byte) []*event.Event {
 	if !r.tracker.ShouldReportFileOps(pid) {
 		return nil
 	}
@@ -440,11 +440,11 @@ func (r *Runner) handleNetConnect(pid int32, timestampNs uint64, comm string, un
 		copy(ipv6[:], unionData[netAddrOff:netAddrOff+16])
 		data["ip"] = net.IP(ipv6[:]).String()
 	}
-	return []*runtimeevent.Event{r.makeEvent(timestampNs, pid, comm, data)}
+	return []*event.Event{r.makeEvent(timestampNs, pid, comm, data)}
 }
 
 // handleFileRename 处理文件重命名事件
-func (r *Runner) handleFileRename(pid int32, timestampNs uint64, comm string, unionData []byte) []*runtimeevent.Event {
+func (r *Runner) handleFileRename(pid int32, timestampNs uint64, comm string, unionData []byte) []*event.Event {
 	if !r.tracker.ShouldReportFileOps(pid) {
 		return nil
 	}
@@ -458,11 +458,11 @@ func (r *Runner) handleFileRename(pid int32, timestampNs uint64, comm string, un
 		"oldpath":   oldpath,
 		"newpath":   newpath,
 	}
-	return []*runtimeevent.Event{r.makeEvent(timestampNs, pid, comm, data)}
+	return []*event.Event{r.makeEvent(timestampNs, pid, comm, data)}
 }
 
 // handleDirCreate 处理目录创建事件
-func (r *Runner) handleDirCreate(pid int32, timestampNs uint64, comm string, unionData []byte) []*runtimeevent.Event {
+func (r *Runner) handleDirCreate(pid int32, timestampNs uint64, comm string, unionData []byte) []*event.Event {
 	if !r.tracker.ShouldReportFileOps(pid) {
 		return nil
 	}
@@ -477,15 +477,15 @@ func (r *Runner) handleDirCreate(pid int32, timestampNs uint64, comm string, uni
 		"path":      path,
 		"mode":      mode,
 	}
-	return []*runtimeevent.Event{r.makeEvent(timestampNs, pid, comm, data)}
+	return []*event.Event{r.makeEvent(timestampNs, pid, comm, data)}
 }
 
 // makeEvent 创建事件
-func (r *Runner) makeEvent(timestampNs uint64, pid int32, comm string, data map[string]interface{}) *runtimeevent.Event {
+func (r *Runner) makeEvent(timestampNs uint64, pid int32, comm string, data map[string]interface{}) *event.Event {
 	jsonData, _ := json.Marshal(data)
-	return &runtimeevent.Event{
+	return &event.Event{
 		TimestampNs:     int64(timestampNs),
-		TimestampUnixMs: runtimeevent.BootNsToUnixMs(int64(timestampNs)),
+		TimestampUnixMs: event.BootNsToUnixMs(int64(timestampNs)),
 		Source:          "process",
 		PID:             uint32(pid),
 		Comm:            comm,
@@ -527,6 +527,12 @@ func isNoiseFilePath(path string) bool {
 		return true
 	}
 	if strings.Contains(path, ".cursor-server/") {
+		return true
+	}
+	if strings.Contains(path, "/node_modules/") {
+		return true
+	}
+	if strings.HasPrefix(path, ".git/objects/") || strings.Contains(path, "/.git/objects/") {
 		return true
 	}
 	if strings.HasSuffix(path, ".lock") || strings.HasSuffix(path, ".pid") {

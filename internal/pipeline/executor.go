@@ -1,4 +1,4 @@
-package command
+package pipeline
 
 import (
 	"context"
@@ -6,8 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	interfacesink "github.com/haolipeng/LLM-Scope/internal/interfaces/sink"
-	"github.com/haolipeng/LLM-Scope/internal/pipeline"
+	pipelinesink "github.com/haolipeng/LLM-Scope/internal/pipeline/sink"
 	pipelinetypes "github.com/haolipeng/LLM-Scope/internal/pipeline/types"
 )
 
@@ -40,10 +39,10 @@ func Execute(cfg ExecuteConfig) error {
 
 	sinks := append([]pipelinetypes.Sink{}, cfg.Sinks...)
 	if cfg.LogFile != "" {
-		sinks = append(sinks, interfacesink.NewFileLogger(cfg.LogFile, cfg.RotateLogs, cfg.MaxLogSize))
+		sinks = append(sinks, pipelinesink.NewFileLogger(cfg.LogFile, cfg.RotateLogs, cfg.MaxLogSize))
 	}
 	if !cfg.Quiet {
-		sinks = append(sinks, interfacesink.NewOutput())
+		sinks = append(sinks, pipelinesink.NewOutput())
 	}
 
 	events, err := cfg.Runner.Run(ctx)
@@ -51,7 +50,7 @@ func Execute(cfg ExecuteConfig) error {
 		return err
 	}
 
-	p := pipeline.New().WithTransforms(cfg.Analyzers...).WithSinks(sinks...)
+	p := New().WithTransforms(cfg.Analyzers...).WithSinks(sinks...)
 	p.Drain(ctx, events, nil)
 	return nil
 }

@@ -6,7 +6,7 @@ import (
 	"log"
 	"strings"
 
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
 // AuthRemover 从 HTTP 事件中移除敏感认证头。
@@ -41,8 +41,8 @@ func (a *AuthRemover) Name() string {
 	return "auth_remover"
 }
 
-func (a *AuthRemover) Process(ctx context.Context, in <-chan *runtimeevent.Event) <-chan *runtimeevent.Event {
-	out := make(chan *runtimeevent.Event)
+func (a *AuthRemover) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
+	out := make(chan *event.Event)
 
 	go func() {
 		defer close(out)

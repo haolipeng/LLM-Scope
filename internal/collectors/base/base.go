@@ -13,7 +13,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
 // BaseRunner provides shared BPF runner infrastructure: ring buffer reading,
@@ -58,7 +58,7 @@ func (b *BaseRunner) InitRingBuffer(rbMap *ebpf.Map) error {
 // ReadLoop reads events from the ring buffer in a loop, calls parseFn for each
 // record, and sends resulting events to the out channel. It closes the channel
 // and the reader when done.
-func (b *BaseRunner) ReadLoop(ctx context.Context, out chan<- *runtimeevent.Event, parseFn func([]byte) []*runtimeevent.Event) {
+func (b *BaseRunner) ReadLoop(ctx context.Context, out chan<- *event.Event, parseFn func([]byte) []*event.Event) {
 	defer close(out)
 	defer b.Reader.Close()
 
@@ -125,6 +125,8 @@ func (b *BaseRunner) AttachUretprobe(exe *link.Executable, symbol string, prog *
 
 // SanitizeBufferData produces a JSON-safe string from raw buffer data,
 // handling UTF-8 validation and control character escaping.
+// CR/LF/TAB are preserved as actual bytes — json.Marshal handles their
+// encoding when the string is serialised to JSON.
 func SanitizeBufferData(buf []byte) string {
 	var sb strings.Builder
 	sb.Grow(len(buf))
@@ -137,11 +139,11 @@ func SanitizeBufferData(buf []byte) string {
 			} else {
 				switch b {
 				case '\n':
-					sb.WriteString("\\n")
+					sb.WriteByte('\n')
 				case '\r':
-					sb.WriteString("\\r")
+					sb.WriteByte('\r')
 				case '\t':
-					sb.WriteString("\\t")
+					sb.WriteByte('\t')
 				default:
 					fmt.Fprintf(&sb, "\\u%04x", b)
 				}

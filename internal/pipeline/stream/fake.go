@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
 // FakeRunner 生成用于测试的模拟 SSL 请求/响应事件对。
@@ -41,8 +41,8 @@ func (r *FakeRunner) Name() string {
 	return "fake"
 }
 
-func (r *FakeRunner) Run(ctx context.Context) (<-chan *runtimeevent.Event, error) {
-	out := make(chan *runtimeevent.Event, 100)
+func (r *FakeRunner) Run(ctx context.Context) (<-chan *event.Event, error) {
+	out := make(chan *event.Event, 100)
 
 	go func() {
 		defer close(out)
@@ -81,7 +81,7 @@ func (r *FakeRunner) Stop() error {
 	return nil
 }
 
-func (r *FakeRunner) generateRequest(index int) *runtimeevent.Event {
+func (r *FakeRunner) generateRequest(index int) *event.Event {
 	timestamp := int64(getBootTimeNs())
 	pid := uint32(1000 + rand.Intn(9000))
 	tid := uint64(pid) + uint64(rand.Intn(100))
@@ -120,9 +120,9 @@ func (r *FakeRunner) generateRequest(index int) *runtimeevent.Event {
 
 	data, _ := json.Marshal(payload)
 
-	return &runtimeevent.Event{
+	return &event.Event{
 		TimestampNs:     timestamp,
-		TimestampUnixMs: runtimeevent.BootNsToUnixMs(timestamp),
+		TimestampUnixMs: event.BootNsToUnixMs(timestamp),
 		Source:          "ssl",
 		PID:             pid,
 		Comm:            "python3",
@@ -130,7 +130,7 @@ func (r *FakeRunner) generateRequest(index int) *runtimeevent.Event {
 	}
 }
 
-func (r *FakeRunner) generateResponse(index int) *runtimeevent.Event {
+func (r *FakeRunner) generateResponse(index int) *event.Event {
 	timestamp := int64(getBootTimeNs())
 	pid := uint32(1000 + rand.Intn(9000))
 	tid := uint64(pid) + uint64(rand.Intn(100))
@@ -155,9 +155,9 @@ func (r *FakeRunner) generateResponse(index int) *runtimeevent.Event {
 
 	data, _ := json.Marshal(payload)
 
-	return &runtimeevent.Event{
+	return &event.Event{
 		TimestampNs:     timestamp,
-		TimestampUnixMs: runtimeevent.BootNsToUnixMs(timestamp),
+		TimestampUnixMs: event.BootNsToUnixMs(timestamp),
 		Source:          "ssl",
 		PID:             pid,
 		Comm:            "python3",

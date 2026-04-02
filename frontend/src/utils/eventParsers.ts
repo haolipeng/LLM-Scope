@@ -529,6 +529,10 @@ export function buildProcessTree(events: Event[]): ProcessNode[] {
       return;
     }
 
+    if (source === 'ssl' || source === 'http_parser') {
+      return;
+    }
+
     const { pid, comm } = event;
     
     // Initialize process if not exists

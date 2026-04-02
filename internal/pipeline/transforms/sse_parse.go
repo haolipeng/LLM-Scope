@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
 type sseEvent struct {
@@ -100,7 +100,7 @@ func (a *sseAccumulator) hasMeaningfulContent() bool {
 	return false
 }
 
-func (a *sseAccumulator) toEvent(original *runtimeevent.Event) *runtimeevent.Event {
+func (a *sseAccumulator) toEvent(original *event.Event) *event.Event {
 	if len(a.events) == 0 {
 		return nil
 	}
@@ -137,9 +137,9 @@ func (a *sseAccumulator) toEvent(original *runtimeevent.Event) *runtimeevent.Eve
 		return nil
 	}
 
-	event := &runtimeevent.Event{
+	event := &event.Event{
 		TimestampNs:     a.endTime,
-		TimestampUnixMs: runtimeevent.BootNsToUnixMs(a.endTime),
+		TimestampUnixMs: event.BootNsToUnixMs(a.endTime),
 		Source:          "sse_processor",
 		Data:            data,
 	}

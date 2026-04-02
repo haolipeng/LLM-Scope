@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
 var (
@@ -44,8 +44,8 @@ func (f *HTTPFilter) Name() string {
 	return "http_filter"
 }
 
-func (f *HTTPFilter) Process(ctx context.Context, in <-chan *runtimeevent.Event) <-chan *runtimeevent.Event {
-	out := make(chan *runtimeevent.Event)
+func (f *HTTPFilter) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
+	out := make(chan *event.Event)
 
 	go func() {
 		defer close(out)

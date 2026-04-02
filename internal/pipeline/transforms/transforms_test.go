@@ -10,10 +10,10 @@ import (
 
 	"github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
 	pipelinetypes "github.com/haolipeng/LLM-Scope/internal/pipeline/types"
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
-func loadEvent(t *testing.T, name string) *runtimeevent.Event {
+func loadEvent(t *testing.T, name string) *event.Event {
 	t.Helper()
 
 	path := filepath.Join("testdata", name)
@@ -22,7 +22,7 @@ func loadEvent(t *testing.T, name string) *runtimeevent.Event {
 		t.Fatalf("read %s: %v", name, err)
 	}
 
-	var event runtimeevent.Event
+	var event event.Event
 	if err := json.Unmarshal(raw, &event); err != nil {
 		t.Fatalf("unmarshal %s: %v", name, err)
 	}
@@ -30,15 +30,15 @@ func loadEvent(t *testing.T, name string) *runtimeevent.Event {
 	return &event
 }
 
-func runAnalyzer(ctx context.Context, a pipelinetypes.Analyzer, input []*runtimeevent.Event) []*runtimeevent.Event {
-	in := make(chan *runtimeevent.Event, len(input))
+func runAnalyzer(ctx context.Context, a pipelinetypes.Analyzer, input []*event.Event) []*event.Event {
+	in := make(chan *event.Event, len(input))
 	for _, event := range input {
 		in <- event
 	}
 	close(in)
 
 	out := a.Process(ctx, in)
-	var result []*runtimeevent.Event
+	var result []*event.Event
 	for event := range out {
 		result = append(result, event)
 	}
@@ -50,7 +50,7 @@ func TestHTTPParser(t *testing.T) {
 	defer cancel()
 
 	a := transforms.NewHTTPParser(false)
-	input := []*runtimeevent.Event{
+	input := []*event.Event{
 		loadEvent(t, "ssl_http_request.json"),
 	}
 
@@ -65,7 +65,7 @@ func TestSSEMerger(t *testing.T) {
 	defer cancel()
 
 	a := transforms.NewSSEMerger()
-	input := []*runtimeevent.Event{
+	input := []*event.Event{
 		loadEvent(t, "ssl_sse_chunk_1.json"),
 		loadEvent(t, "ssl_sse_chunk_2.json"),
 	}
@@ -81,7 +81,7 @@ func TestToolCallAggregator(t *testing.T) {
 	defer cancel()
 
 	a := transforms.NewToolCallAggregator()
-	input := []*runtimeevent.Event{
+	input := []*event.Event{
 		loadEvent(t, "process_exec.json"),
 		loadEvent(t, "process_file_open.json"),
 	}
@@ -92,7 +92,7 @@ func TestToolCallAggregator(t *testing.T) {
 	}
 }
 
-func containsSource(events []*runtimeevent.Event, source string) bool {
+func containsSource(events []*event.Event, source string) bool {
 	for _, event := range events {
 		if event.Source == source {
 			return true

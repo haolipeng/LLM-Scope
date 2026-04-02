@@ -10,9 +10,9 @@ import (
 
 	"github.com/cilium/ebpf/rlimit"
 
-	bpfstdio "github.com/haolipeng/LLM-Scope/internal/runtime/bpf/stdiocap"
-	runtimebase "github.com/haolipeng/LLM-Scope/internal/runtime/collectors/base"
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	bpfstdio "github.com/haolipeng/LLM-Scope/internal/bpf/stdiocap"
+	runtimebase "github.com/haolipeng/LLM-Scope/internal/collectors/base"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
 // Stdio event field offsets for struct stdiocap_event_t on x86_64.
@@ -61,7 +61,7 @@ func New(config Config) *Runner {
 func (r *Runner) ID() string   { return "stdio" }
 func (r *Runner) Name() string { return "stdio" }
 
-func (r *Runner) Run(ctx context.Context) (<-chan *runtimeevent.Event, error) {
+func (r *Runner) Run(ctx context.Context) (<-chan *event.Event, error) {
 	if err := rlimit.RemoveMemlock(); err != nil {
 		log.Printf("[Stdio] warning: remove memlock: %v", err)
 	}
@@ -113,21 +113,21 @@ func (r *Runner) Run(ctx context.Context) (<-chan *runtimeevent.Event, error) {
 		return nil, err
 	}
 
-	out := make(chan *runtimeevent.Event, 100)
+	out := make(chan *event.Event, 100)
 	go r.ReadLoop(ctx, out, r.parseEvents)
 
 	return out, nil
 }
 
-func (r *Runner) parseEvents(raw []byte) []*runtimeevent.Event {
-	event := r.parseStdioEvent(raw)
-	if event == nil {
+func (r *Runner) parseEvents(raw []byte) []*event.Event {
+	evt := r.parseStdioEvent(raw)
+	if evt == nil {
 		return nil
 	}
-	return []*runtimeevent.Event{event}
+	return []*event.Event{evt}
 }
 
-func (r *Runner) parseStdioEvent(raw []byte) *runtimeevent.Event {
+func (r *Runner) parseStdioEvent(raw []byte) *event.Event {
 	if len(raw) < stdioMinEventSize {
 		return nil
 	}
@@ -181,9 +181,9 @@ func (r *Runner) parseStdioEvent(raw []byte) *runtimeevent.Event {
 	}
 
 	jsonData, _ := json.Marshal(data)
-	return &runtimeevent.Event{
+	return &event.Event{
 		TimestampNs:     int64(timestampNs),
-		TimestampUnixMs: runtimeevent.BootNsToUnixMs(int64(timestampNs)),
+		TimestampUnixMs: event.BootNsToUnixMs(int64(timestampNs)),
 		Source:          "stdio",
 		PID:             pid,
 		Comm:            comm,

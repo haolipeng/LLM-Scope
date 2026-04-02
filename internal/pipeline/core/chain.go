@@ -4,7 +4,7 @@ import (
 	"context"
 
 	pipelinetypes "github.com/haolipeng/LLM-Scope/internal/pipeline/types"
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
 type chain struct {
@@ -20,7 +20,7 @@ func (c chain) Name() string {
 	return "chain"
 }
 
-func (c chain) Process(ctx context.Context, in <-chan *runtimeevent.Event) <-chan *runtimeevent.Event {
+func (c chain) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
 	out := in
 	for _, a := range c.analyzers {
 		out = a.Process(ctx, out)

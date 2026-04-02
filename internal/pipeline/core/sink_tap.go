@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	pipelinetypes "github.com/haolipeng/LLM-Scope/internal/pipeline/types"
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
 type sinkTap struct {
@@ -21,27 +21,27 @@ func AttachSinks(sinks ...pipelinetypes.Sink) pipelinetypes.Analyzer {
 
 func (s sinkTap) Name() string { return "sink_tap" }
 
-func (s sinkTap) Process(ctx context.Context, in <-chan *runtimeevent.Event) <-chan *runtimeevent.Event {
+func (s sinkTap) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
 	if len(s.sinks) == 0 {
 		return in
 	}
 
-	sinkChans := make([]chan *runtimeevent.Event, 0, len(s.sinks))
+	sinkChans := make([]chan *event.Event, 0, len(s.sinks))
 	for range s.sinks {
-		sinkChans = append(sinkChans, make(chan *runtimeevent.Event, 100))
+		sinkChans = append(sinkChans, make(chan *event.Event, 100))
 	}
 
 	var wg sync.WaitGroup
 	for i, sink := range s.sinks {
 		ch := sinkChans[i]
 		wg.Add(1)
-		go func(sk pipelinetypes.Sink, c <-chan *runtimeevent.Event) {
+		go func(sk pipelinetypes.Sink, c <-chan *event.Event) {
 			defer wg.Done()
 			sk.Consume(ctx, c)
 		}(sink, ch)
 	}
 
-	out := make(chan *runtimeevent.Event)
+	out := make(chan *event.Event)
 	go func() {
 		defer close(out)
 		defer func() {

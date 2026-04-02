@@ -9,7 +9,7 @@ import (
 	"os"
 	"sync"
 
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
 // FileLogger 将每条事件以 JSONL 形式追加写入文件。
@@ -49,7 +49,7 @@ func (f *FileLogger) Name() string {
 	return "file_logger"
 }
 
-func (f *FileLogger) Consume(ctx context.Context, in <-chan *runtimeevent.Event) {
+func (f *FileLogger) Consume(ctx context.Context, in <-chan *event.Event) {
 	defer f.closeFile()
 	for {
 		select {
@@ -91,7 +91,7 @@ func (f *FileLogger) flushAndClose() {
 	}
 }
 
-func (f *FileLogger) writeEvent(event *runtimeevent.Event) {
+func (f *FileLogger) writeEvent(event *event.Event) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 

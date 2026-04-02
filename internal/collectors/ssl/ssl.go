@@ -12,9 +12,9 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
 
-	bpfssl "github.com/haolipeng/LLM-Scope/internal/runtime/bpf/sslsniff"
-	runtimebase "github.com/haolipeng/LLM-Scope/internal/runtime/collectors/base"
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	bpfssl "github.com/haolipeng/LLM-Scope/internal/bpf/sslsniff"
+	runtimebase "github.com/haolipeng/LLM-Scope/internal/collectors/base"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
 const (
@@ -67,7 +67,7 @@ func New(config Config) *Runner {
 func (r *Runner) ID() string   { return "ssl" }
 func (r *Runner) Name() string { return "ssl" }
 
-func (r *Runner) Run(ctx context.Context) (<-chan *runtimeevent.Event, error) {
+func (r *Runner) Run(ctx context.Context) (<-chan *event.Event, error) {
 	if err := rlimit.RemoveMemlock(); err != nil {
 		log.Printf("[SSL] warning: remove memlock: %v", err)
 	}
@@ -108,7 +108,7 @@ func (r *Runner) Run(ctx context.Context) (<-chan *runtimeevent.Event, error) {
 		return nil, err
 	}
 
-	out := make(chan *runtimeevent.Event, 100)
+	out := make(chan *event.Event, 100)
 	go r.ReadLoop(ctx, out, r.parseEvents)
 
 	return out, nil
@@ -185,15 +185,15 @@ func (r *Runner) getProgramByName(name string) *ebpf.Program {
 	}
 }
 
-func (r *Runner) parseEvents(raw []byte) []*runtimeevent.Event {
-	event := r.parseSSLEvent(raw)
-	if event == nil {
+func (r *Runner) parseEvents(raw []byte) []*event.Event {
+	evt := r.parseSSLEvent(raw)
+	if evt == nil {
 		return nil
 	}
-	return []*runtimeevent.Event{event}
+	return []*event.Event{evt}
 }
 
-func (r *Runner) parseSSLEvent(raw []byte) *runtimeevent.Event {
+func (r *Runner) parseSSLEvent(raw []byte) *event.Event {
 	if len(raw) < sslMinEventSize {
 		return nil
 	}
@@ -268,9 +268,9 @@ func (r *Runner) parseSSLEvent(raw []byte) *runtimeevent.Event {
 	}
 
 	jsonData, _ := json.Marshal(data)
-	return &runtimeevent.Event{
+	return &event.Event{
 		TimestampNs:     int64(timestampNs),
-		TimestampUnixMs: runtimeevent.BootNsToUnixMs(int64(timestampNs)),
+		TimestampUnixMs: event.BootNsToUnixMs(int64(timestampNs)),
 		Source:          "ssl",
 		PID:             pid,
 		Comm:            comm,

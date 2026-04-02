@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
 // Output 将事件以 JSON 形式输出到标准输出。
@@ -19,17 +19,17 @@ func (o *Output) Name() string {
 	return "output"
 }
 
-func (o *Output) Consume(ctx context.Context, in <-chan *runtimeevent.Event) {
+func (o *Output) Consume(ctx context.Context, in <-chan *event.Event) {
 	encoder := json.NewEncoder(ConsoleWriter{})
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case event, ok := <-in:
+		case evt, ok := <-in:
 			if !ok {
 				return
 			}
-			normalized := normalizeBinaryForOutput(event)
+			normalized := normalizeBinaryForOutput(evt)
 			if err := encoder.Encode(normalized); err != nil {
 				fmt.Printf("{\"error\":%q}\n", err.Error())
 			}
@@ -37,34 +37,34 @@ func (o *Output) Consume(ctx context.Context, in <-chan *runtimeevent.Event) {
 	}
 }
 
-func normalizeBinaryForOutput(event *runtimeevent.Event) *runtimeevent.Event {
+func normalizeBinaryForOutput(evt *event.Event) *event.Event {
 	var data map[string]interface{}
-	if err := json.Unmarshal(event.Data, &data); err != nil {
-		return event
+	if err := json.Unmarshal(evt.Data, &data); err != nil {
+		return evt
 	}
 
 	value, ok := data["data"].(string)
 	if !ok {
-		return event
+		return evt
 	}
 
 	converted := dataToString(value)
 	if converted == value {
-		return event
+		return evt
 	}
 
 	data["data"] = converted
 	updated, err := json.Marshal(data)
 	if err != nil {
-		return event
+		return evt
 	}
 
-	return &runtimeevent.Event{
-		TimestampNs:     event.TimestampNs,
-		TimestampUnixMs: event.TimestampUnixMs,
-		Source:          event.Source,
-		PID:             event.PID,
-		Comm:            event.Comm,
+	return &event.Event{
+		TimestampNs:     evt.TimestampNs,
+		TimestampUnixMs: evt.TimestampUnixMs,
+		Source:          evt.Source,
+		PID:             evt.PID,
+		Comm:            evt.Comm,
 		Data:            updated,
 	}
 }

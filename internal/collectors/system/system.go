@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
 // Config controls /proc sampling.
@@ -43,8 +43,8 @@ func (s *Runner) Name() string {
 	return "system"
 }
 
-func (s *Runner) Run(ctx context.Context) (<-chan *runtimeevent.Event, error) {
-	out := make(chan *runtimeevent.Event, 100)
+func (s *Runner) Run(ctx context.Context) (<-chan *event.Event, error) {
+	out := make(chan *event.Event, 100)
 	go func() {
 		defer close(out)
 		interval := time.NewTicker(time.Duration(s.config.IntervalSeconds) * time.Second)
@@ -196,7 +196,7 @@ func getAllChildren(parent uint32) []uint32 {
 }
 
 // collectProcessMetrics 采集目标进程组的 CPU/内存/线程指标
-func collectProcessMetrics(pid uint32, allPids []uint32, timestamp uint64, previous map[uint32]processStats, cfg Config) (*runtimeevent.Event, error) {
+func collectProcessMetrics(pid uint32, allPids []uint32, timestamp uint64, previous map[uint32]processStats, cfg Config) (*event.Event, error) {
 	var totalRSS uint64
 	var totalVSZ uint64
 	var totalCPU float64
@@ -264,9 +264,9 @@ func collectProcessMetrics(pid uint32, allPids []uint32, timestamp uint64, previ
 		return nil, err
 	}
 
-	return &runtimeevent.Event{
+	return &event.Event{
 		TimestampNs:     int64(timestamp),
-		TimestampUnixMs: runtimeevent.BootNsToUnixMs(int64(timestamp)),
+		TimestampUnixMs: event.BootNsToUnixMs(int64(timestamp)),
 		Source:          "system",
 		PID:             pid,
 		Comm:            processName,
@@ -275,7 +275,7 @@ func collectProcessMetrics(pid uint32, allPids []uint32, timestamp uint64, previ
 }
 
 // systemWideMetrics 采集系统级 load average 和内存指标
-func systemWideMetrics(timestamp uint64) (*runtimeevent.Event, error) {
+func systemWideMetrics(timestamp uint64) (*event.Event, error) {
 	load1, load5, load15 := loadAverage()
 	totalKB, freeKB, availKB := systemMemory()
 	usedKB := totalKB - availKB
@@ -309,9 +309,9 @@ func systemWideMetrics(timestamp uint64) (*runtimeevent.Event, error) {
 		return nil, err
 	}
 
-	return &runtimeevent.Event{
+	return &event.Event{
 		TimestampNs:     int64(timestamp),
-		TimestampUnixMs: runtimeevent.BootNsToUnixMs(int64(timestamp)),
+		TimestampUnixMs: event.BootNsToUnixMs(int64(timestamp)),
 		Source:          "system",
 		PID:             0,
 		Comm:            "system",

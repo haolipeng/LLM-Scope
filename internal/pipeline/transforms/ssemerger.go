@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
 // SSEMerger merges SSE fragments into a single event.
@@ -32,8 +32,8 @@ func (s *SSEMerger) Name() string {
 	return "sse_merger"
 }
 
-func (s *SSEMerger) Process(ctx context.Context, in <-chan *runtimeevent.Event) <-chan *runtimeevent.Event {
-	out := make(chan *runtimeevent.Event)
+func (s *SSEMerger) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
+	out := make(chan *event.Event)
 
 	go func() {
 		defer close(out)
@@ -64,7 +64,7 @@ func (s *SSEMerger) Process(ctx context.Context, in <-chan *runtimeevent.Event) 
 	return out
 }
 
-func (s *SSEMerger) handleEvent(event *runtimeevent.Event, out chan<- *runtimeevent.Event) {
+func (s *SSEMerger) handleEvent(event *event.Event, out chan<- *event.Event) {
 	var payload map[string]interface{}
 	if err := json.Unmarshal(event.Data, &payload); err != nil {
 		out <- event
@@ -136,7 +136,7 @@ func (s *SSEMerger) handleEvent(event *runtimeevent.Event, out chan<- *runtimeev
 	}
 }
 
-func (s *SSEMerger) flushAll(out chan<- *runtimeevent.Event) {
+func (s *SSEMerger) flushAll(out chan<- *event.Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for key, acc := range s.buffers {
@@ -150,7 +150,7 @@ func (s *SSEMerger) flushAll(out chan<- *runtimeevent.Event) {
 	}
 }
 
-func (s *SSEMerger) flushExpired(out chan<- *runtimeevent.Event) {
+func (s *SSEMerger) flushExpired(out chan<- *event.Event) {
 	now := time.Now()
 	s.mu.Lock()
 	for key, acc := range s.buffers {
@@ -167,16 +167,13 @@ func (s *SSEMerger) flushExpired(out chan<- *runtimeevent.Event) {
 	s.mu.Unlock()
 }
 
-func (s *SSEMerger) connectionID(event *runtimeevent.Event, events []sseEvent, payload map[string]interface{}) (string, string) {
+func (s *SSEMerger) connectionID(event *event.Event, events []sseEvent, payload map[string]interface{}) (string, string) {
 	pid := event.PID
 	tid := getUint64(payload["tid"])
-
-	if msgID := extractMessageID(events); msgID != "" {
-		return fmt.Sprintf("%d:%d:%s", pid, tid, msgID), msgID
-	}
+	msgID := extractMessageID(events)
 
 	window := event.TimestampNs / 600_000_000_000
-	return fmt.Sprintf("%d:%d:%d", pid, tid, window), ""
+	return fmt.Sprintf("%d:%d:%d", pid, tid, window), msgID
 }
 
 func emptyToNil(value string) interface{} {

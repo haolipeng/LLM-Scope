@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
 var (
@@ -44,8 +44,8 @@ func (f *SSLFilter) Name() string {
 	return "ssl_filter"
 }
 
-func (f *SSLFilter) Process(ctx context.Context, in <-chan *runtimeevent.Event) <-chan *runtimeevent.Event {
-	out := make(chan *runtimeevent.Event)
+func (f *SSLFilter) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
+	out := make(chan *event.Event)
 
 	go func() {
 		defer close(out)

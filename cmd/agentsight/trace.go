@@ -11,18 +11,18 @@ import (
 	"syscall"
 	"time"
 
-	agentsightserver "github.com/haolipeng/LLM-Scope/internal/interfaces/http"
-	interfacesink "github.com/haolipeng/LLM-Scope/internal/interfaces/sink"
+	agentsightserver "github.com/haolipeng/LLM-Scope/internal/httpserver"
+	pipelinesink "github.com/haolipeng/LLM-Scope/internal/pipeline/sink"
 	"github.com/haolipeng/LLM-Scope/internal/pipeline"
 	pipelinecore "github.com/haolipeng/LLM-Scope/internal/pipeline/core"
 	pipelinestream "github.com/haolipeng/LLM-Scope/internal/pipeline/stream"
 	pipelinetransforms "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
 	pipelinetypes "github.com/haolipeng/LLM-Scope/internal/pipeline/types"
-	processcollector "github.com/haolipeng/LLM-Scope/internal/runtime/collectors/process"
-	sslcollector "github.com/haolipeng/LLM-Scope/internal/runtime/collectors/ssl"
-	stdiocollector "github.com/haolipeng/LLM-Scope/internal/runtime/collectors/stdio"
-	systemcollector "github.com/haolipeng/LLM-Scope/internal/runtime/collectors/system"
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	processcollector "github.com/haolipeng/LLM-Scope/internal/collectors/process"
+	sslcollector "github.com/haolipeng/LLM-Scope/internal/collectors/ssl"
+	stdiocollector "github.com/haolipeng/LLM-Scope/internal/collectors/stdio"
+	systemcollector "github.com/haolipeng/LLM-Scope/internal/collectors/system"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 	"github.com/spf13/cobra"
 )
 
@@ -213,7 +213,7 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 	}()
 
 	var runners []pipelinetypes.Runner
-	var streams []<-chan *runtimeevent.Event
+	var streams []<-chan *event.Event
 
 	// 构建 SSL 监控管道：过滤器 -> SSE 合并 -> HTTP 解析 -> 认证头移除
 	if cfg.SSL.Enabled {
@@ -300,7 +300,7 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 	var analyticsDB *sql.DB
 	var sinks []pipelinetypes.Sink
 	if cfg.Output.DuckDBPath != "" {
-		duckdbSink, err := interfacesink.NewDuckDBSink(interfacesink.DuckDBConfig{
+		duckdbSink, err := pipelinesink.NewDuckDBSink(pipelinesink.DuckDBConfig{
 			DBPath: cfg.Output.DuckDBPath,
 		})
 		if err != nil {
@@ -317,13 +317,20 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 
 	// 全局处理管道：transform + sinks
 	var transforms []pipelinetypes.Analyzer
-	transforms = append(transforms, pipelinetransforms.NewToolCallAggregator())
+	transforms = append(transforms, pipelinetransforms.NewSecurityAnalyzer())
+	// Use ClaudeToolCallAnalyzer for HTTP-based tool call identification;
+	// falls back to ToolCallAggregator when SSL/HTTP is disabled.
+	if cfg.SSL.Enabled {
+		transforms = append(transforms, pipelinetransforms.NewClaudeToolCallAnalyzer())
+	} else {
+		transforms = append(transforms, pipelinetransforms.NewToolCallAggregator())
+	}
 
 	if cfg.Output.LogFile != "" {
-		sinks = append(sinks, interfacesink.NewFileLogger(cfg.Output.LogFile, cfg.Output.RotateLogs, cfg.Output.MaxLogSize))
+		sinks = append(sinks, pipelinesink.NewFileLogger(cfg.Output.LogFile, cfg.Output.RotateLogs, cfg.Output.MaxLogSize))
 	}
 	if !cfg.Output.Quiet {
-		sinks = append(sinks, interfacesink.NewOutput())
+		sinks = append(sinks, pipelinesink.NewOutput())
 	}
 
 	// 消费全局管道输出（无实时推送，仅由 sinks 处理与持久化）

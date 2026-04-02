@@ -3,11 +3,96 @@
 
 'use client';
 
-import { ChevronDownIcon, ChevronRightIcon, CpuChipIcon } from '@heroicons/react/24/outline';
+import { useState } from 'react';
+import { ChevronDownIcon, ChevronRightIcon, CpuChipIcon, DocumentIcon } from '@heroicons/react/24/outline';
 import { ProcessNode as ProcessNodeType, ParsedEvent, TimelineItem } from '@/utils/eventParsers';
 import { UnifiedBlock } from './UnifiedBlock';
 import { adaptEventToUnifiedBlock } from './BlockAdapters';
 import { useTranslation } from '@/i18n';
+
+type GroupedTimelineItem =
+  | { kind: 'single'; item: TimelineItem }
+  | { kind: 'file_group'; events: ParsedEvent[] };
+
+function groupTimeline(timeline: TimelineItem[]): GroupedTimelineItem[] {
+  const result: GroupedTimelineItem[] = [];
+  let fileRun: ParsedEvent[] = [];
+
+  const flushFileRun = () => {
+    if (fileRun.length === 0) return;
+    if (fileRun.length <= 2) {
+      fileRun.forEach(e => result.push({ kind: 'single', item: { type: 'event', timestamp: e.timestamp, event: e } }));
+    } else {
+      result.push({ kind: 'file_group', events: [...fileRun] });
+    }
+    fileRun = [];
+  };
+
+  for (const item of timeline) {
+    if (item.type === 'event' && item.event?.type === 'file') {
+      fileRun.push(item.event);
+    } else {
+      flushFileRun();
+      result.push({ kind: 'single', item });
+    }
+  }
+  flushFileRun();
+  return result;
+}
+
+interface FileGroupProps {
+  events: ParsedEvent[];
+  expandedEvents: Set<string>;
+  onToggleEvent: (eventId: string) => void;
+}
+
+function FileGroup({ events, expandedEvents, onToggleEvent }: FileGroupProps) {
+  const [expanded, setExpanded] = useState(false);
+  const { t } = useTranslation();
+
+  return (
+    <div className="border-l-2 border-cyan-200 rounded-r-lg bg-cyan-50/30">
+      <div
+        className="flex items-center py-2 px-3 cursor-pointer hover:bg-cyan-50 select-none"
+        onClick={() => setExpanded(!expanded)}
+      >
+        {expanded ? (
+          <ChevronDownIcon className="h-4 w-4 text-cyan-600 mr-2 flex-shrink-0" />
+        ) : (
+          <ChevronRightIcon className="h-4 w-4 text-cyan-600 mr-2 flex-shrink-0" />
+        )}
+        <DocumentIcon className="h-4 w-4 text-cyan-600 mr-2 flex-shrink-0" />
+        <span className="text-sm font-medium text-cyan-800">
+          {events.length} {t('badge.file_other', { count: events.length })}
+        </span>
+        <span className="ml-2 text-xs text-cyan-500 truncate">
+          {events.slice(0, 3).map(e => {
+            const path = e.metadata?.filepath || e.title || '';
+            const basename = path.split('/').pop() || path;
+            return basename;
+          }).join(', ')}
+          {events.length > 3 && ' …'}
+        </span>
+      </div>
+      {expanded && (
+        <div className="space-y-1 pl-2 pb-1">
+          {events.map(event => {
+            const isEventExpanded = expandedEvents.has(event.id);
+            const data = adaptEventToUnifiedBlock(event);
+            return (
+              <UnifiedBlock
+                key={event.id}
+                data={data}
+                isExpanded={isEventExpanded}
+                onToggle={() => onToggleEvent(event.id)}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface ProcessNodeProps {
   process: ProcessNodeType;
@@ -100,7 +185,20 @@ export function ProcessNode({
     );
   };
 
-  const renderTimelineItem = (item: TimelineItem, index: number) => {
+  const groupedTimeline = groupTimeline(process.timeline);
+
+  const renderGroupedItem = (grouped: GroupedTimelineItem, index: number) => {
+    if (grouped.kind === 'file_group') {
+      return (
+        <FileGroup
+          key={`fg-${index}`}
+          events={grouped.events}
+          expandedEvents={expandedEvents}
+          onToggleEvent={onToggleEvent}
+        />
+      );
+    }
+    const item = grouped.item;
     if (item.type === 'event' && item.event) {
       return renderEvent(item.event);
     } else if (item.type === 'process' && item.process) {
@@ -166,9 +264,9 @@ export function ProcessNode({
       {/* Expanded Content - Timeline View */}
       {isExpanded && (
         <div style={{ marginLeft: `${indent + 32}px` }} className="mt-1 mb-2">
-          {process.timeline.length > 0 && (
+          {groupedTimeline.length > 0 && (
             <div className="space-y-1">
-              {process.timeline.map((item, index) => renderTimelineItem(item, index))}
+              {groupedTimeline.map((item, index) => renderGroupedItem(item, index))}
             </div>
           )}
         </div>

@@ -79,6 +79,12 @@ func isNoiseFilePath(filepath string) bool {
 	if strings.Contains(filepath, ".cursor-server/") {
 		return true
 	}
+	if strings.Contains(filepath, "/node_modules/") {
+		return true
+	}
+	if strings.HasPrefix(filepath, ".git/objects/") || strings.Contains(filepath, "/.git/objects/") {
+		return true
+	}
 	if strings.HasSuffix(filepath, ".lock") || strings.HasSuffix(filepath, ".pid") {
 		return true
 	}

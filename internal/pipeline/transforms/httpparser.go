@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
 // HTTPParser parses SSL events into HTTP request/response events.
@@ -21,8 +21,8 @@ func (p *HTTPParser) Name() string {
 	return "http_parser"
 }
 
-func (p *HTTPParser) Process(ctx context.Context, in <-chan *runtimeevent.Event) <-chan *runtimeevent.Event {
-	out := make(chan *runtimeevent.Event)
+func (p *HTTPParser) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
+	out := make(chan *event.Event)
 
 	go func() {
 		defer close(out)
@@ -52,7 +52,7 @@ func (p *HTTPParser) Process(ctx context.Context, in <-chan *runtimeevent.Event)
 	return out
 }
 
-func (p *HTTPParser) parseEvent(event *runtimeevent.Event) *runtimeevent.Event {
+func (p *HTTPParser) parseEvent(event *event.Event) *event.Event {
 	var data map[string]interface{}
 	if err := json.Unmarshal(event.Data, &data); err != nil {
 		return nil
@@ -182,7 +182,7 @@ func parseHTTPMessage(data string) *httpMessage {
 	}
 }
 
-func buildHTTPEvent(msg *httpMessage, tid uint64, original *runtimeevent.Event, includeRaw bool) *runtimeevent.Event {
+func buildHTTPEvent(msg *httpMessage, tid uint64, original *event.Event, includeRaw bool) *event.Event {
 	contentLength := int64(-1)
 	if value, ok := msg.headers["content-length"]; ok {
 		if parsed, err := parseInt(value); err == nil {
@@ -233,7 +233,7 @@ func buildHTTPEvent(msg *httpMessage, tid uint64, original *runtimeevent.Event, 
 		return nil
 	}
 
-	return &runtimeevent.Event{
+	return &event.Event{
 		TimestampNs:     original.TimestampNs,
 		TimestampUnixMs: original.TimestampUnixMs,
 		Source:          "http_parser",

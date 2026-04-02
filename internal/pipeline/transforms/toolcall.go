@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
 type toolCallConfig struct {
@@ -60,8 +60,8 @@ func (t *ToolCallAggregator) Name() string {
 	return "tool_call_aggregator"
 }
 
-func (t *ToolCallAggregator) Process(ctx context.Context, in <-chan *runtimeevent.Event) <-chan *runtimeevent.Event {
-	out := make(chan *runtimeevent.Event)
+func (t *ToolCallAggregator) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
+	out := make(chan *event.Event)
 
 	go func() {
 		defer close(out)
@@ -80,12 +80,17 @@ func (t *ToolCallAggregator) Process(ctx context.Context, in <-chan *runtimeeven
 					t.flushAll(out)
 					return
 				}
-				if _, ok := t.extractors[event.Source]; !ok {
+				extractor, ok := t.extractors[event.Source]
+				if !ok {
 					out <- event
 					continue
 				}
-				t.handleEvent(event, out)
-				out <- event
+				extractions := extractor.Extract(event.Data)
+				if len(extractions) == 0 {
+					out <- event
+					continue
+				}
+				t.handleExtractions(event, extractions, out)
 			}
 		}
 	}()
@@ -93,7 +98,7 @@ func (t *ToolCallAggregator) Process(ctx context.Context, in <-chan *runtimeeven
 	return out
 }
 
-func (t *ToolCallAggregator) flushAll(out chan<- *runtimeevent.Event) {
+func (t *ToolCallAggregator) flushAll(out chan<- *event.Event) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for _, state := range t.live {
@@ -102,13 +107,13 @@ func (t *ToolCallAggregator) flushAll(out chan<- *runtimeevent.Event) {
 	t.live = make(map[toolCallKey]*toolCallState)
 }
 
-func (t *ToolCallAggregator) flushExpired(out chan<- *runtimeevent.Event, now time.Time) {
+func (t *ToolCallAggregator) flushExpired(out chan<- *event.Event, now time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	cutoff := now.Add(-t.cfg.idleGap)
 	for key, state := range t.live {
-		last := runtimeevent.BootNsToTime(state.lastNs)
+		last := event.BootNsToTime(state.lastNs)
 		if last.Before(cutoff) {
 			out <- t.finishState(state, "timeout", "idle_gap")
 			delete(t.live, key)
@@ -116,12 +121,8 @@ func (t *ToolCallAggregator) flushExpired(out chan<- *runtimeevent.Event, now ti
 	}
 }
 
-func (t *ToolCallAggregator) handleEvent(event *runtimeevent.Event, out chan<- *runtimeevent.Event) {
-	extractor, ok := t.extractors[event.Source]
-	if !ok {
-		return
-	}
-	for _, ex := range extractor.Extract(event.Data) {
+func (t *ToolCallAggregator) handleExtractions(event *event.Event, extractions []toolCallExtraction, out chan<- *event.Event) {
+	for _, ex := range extractions {
 		state, isNew, rolled := t.startOrUpdate(event, ex.toolName, ex.keyField, ex.argsSummary, ex.bytes)
 		if rolled != nil {
 			out <- rolled
@@ -136,7 +137,7 @@ func (t *ToolCallAggregator) handleEvent(event *runtimeevent.Event, out chan<- *
 	}
 }
 
-func (t *ToolCallAggregator) startOrUpdate(event *runtimeevent.Event, toolName, keyField, argsSummary string, bytes int64) (*toolCallState, bool, *runtimeevent.Event) {
+func (t *ToolCallAggregator) startOrUpdate(event *event.Event, toolName, keyField, argsSummary string, bytes int64) (*toolCallState, bool, *event.Event) {
 	tid := extractTid(event)
 	key := toolCallKey{
 		pid:      event.PID,
@@ -191,7 +192,7 @@ func (t *ToolCallAggregator) removeState(key toolCallKey) {
 	delete(t.live, key)
 }
 
-func (t *ToolCallAggregator) startEvent(event *runtimeevent.Event, state *toolCallState) *runtimeevent.Event {
+func (t *ToolCallAggregator) startEvent(event *event.Event, state *toolCallState) *event.Event {
 	payload := map[string]interface{}{
 		"tool_name":    state.key.toolName,
 		"args_summary": state.argsSummary,
@@ -202,7 +203,7 @@ func (t *ToolCallAggregator) startEvent(event *runtimeevent.Event, state *toolCa
 	return newToolCallEvent(event, "tool_call_start", payload)
 }
 
-func (t *ToolCallAggregator) finishState(state *toolCallState, status, reason string) *runtimeevent.Event {
+func (t *ToolCallAggregator) finishState(state *toolCallState, status, reason string) *event.Event {
 	payload := map[string]interface{}{
 		"event_type":  "tool_call_end",
 		"tool_name":   state.key.toolName,
@@ -214,9 +215,9 @@ func (t *ToolCallAggregator) finishState(state *toolCallState, status, reason st
 		"key_field":   state.key.keyField,
 		"tid":         state.key.tid,
 	}
-	return &runtimeevent.Event{
+	return &event.Event{
 		TimestampNs:     state.lastNs,
-		TimestampUnixMs: runtimeevent.BootNsToUnixMs(state.lastNs),
+		TimestampUnixMs: event.BootNsToUnixMs(state.lastNs),
 		Source:          "tool_call",
 		PID:             state.key.pid,
 		Comm:            state.comm,
@@ -224,9 +225,9 @@ func (t *ToolCallAggregator) finishState(state *toolCallState, status, reason st
 	}
 }
 
-func newToolCallEvent(original *runtimeevent.Event, eventType string, payload map[string]interface{}) *runtimeevent.Event {
+func newToolCallEvent(original *event.Event, eventType string, payload map[string]interface{}) *event.Event {
 	payload["event_type"] = eventType
-	return &runtimeevent.Event{
+	return &event.Event{
 		TimestampNs:     original.TimestampNs,
 		TimestampUnixMs: original.TimestampUnixMs,
 		Source:          "tool_call",
@@ -243,7 +244,7 @@ func classifyFileTool(flags uint64) string {
 	return "fs.write"
 }
 
-func extractTid(event *runtimeevent.Event) uint32 {
+func extractTid(event *event.Event) uint32 {
 	if event.Source == "process" {
 		return 0
 	}

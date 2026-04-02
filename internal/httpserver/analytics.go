@@ -3,6 +3,7 @@ package httpserver
 import (
 	"database/sql"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -102,10 +103,8 @@ func handleToolCallLatency(db *sql.DB) gin.HandlerFunc {
 				MIN(duration_ms) AS min_ms,
 				MAX(duration_ms) AS max_ms,
 				COUNT(*) AS sample_count
-			FROM events
-			WHERE source = 'tool_call'
-			  AND tool_event_type = 'tool_call_end'
-			  AND duration_ms IS NOT NULL
+			FROM events_tool_call
+			WHERE duration_ms IS NOT NULL
 		`
 		var args []any
 		if sid := c.Query("session_id"); sid != "" {
@@ -133,9 +132,8 @@ func handleProcessTree(db *sql.DB) gin.HandlerFunc {
 				pid, ppid, comm, filename, full_command,
 				event_time, exit_code, duration_ms,
 				event_type, session_id
-			FROM events
-			WHERE source = 'process'
-			  AND event_type IN ('EXEC', 'EXIT')
+			FROM events_process
+			WHERE event_type IN ('EXEC', 'EXIT')
 		`
 		var args []any
 		if sid := c.Query("session_id"); sid != "" {
@@ -164,8 +162,9 @@ func handleHotFiles(db *sql.DB) gin.HandlerFunc {
 			query += " WHERE session_id = ?"
 			args = append(args, sid)
 		}
-		limit := c.DefaultQuery("limit", "100")
-		query += " LIMIT " + limit
+		limit := parseLimit(c.Query("limit"), 100)
+		query += " LIMIT ?"
+		args = append(args, limit)
 
 		rows, err := db.Query(query, args...)
 		if err != nil {
@@ -189,9 +188,9 @@ func handleSecurityAlerts(db *sql.DB) gin.HandlerFunc {
 		}
 		query += " ORDER BY event_time DESC"
 
-		if limit := c.Query("limit"); limit != "" {
-			query += " LIMIT " + limit
-		}
+		limit := parseLimit(c.Query("limit"), 1000)
+		query += " LIMIT ?"
+		args = append(args, limit)
 
 		rows, err := db.Query(query, args...)
 		if err != nil {
@@ -210,12 +209,9 @@ func handleSessions(db *sql.DB) gin.HandlerFunc {
 		query := `
 			SELECT
 				session_id,
-				COUNT(*) AS total_events,
-				MIN(event_time) AS start_time,
-				MAX(event_time) AS end_time,
-				COUNT(DISTINCT source) AS source_types
-			FROM events
-			GROUP BY session_id
+				start_time,
+				end_time
+			FROM sessions
 			ORDER BY start_time DESC
 		`
 		rows, err := db.Query(query)
@@ -232,34 +228,78 @@ func handleSessions(db *sql.DB) gin.HandlerFunc {
 
 func handleTimeline(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		query := `
-			SELECT
-				id, session_id, event_time, source, pid, comm,
-				event_type, tool_event_type, tool_name, tool_status,
-				filepath, net_ip, net_port, full_command,
-				is_sensitive_file, is_dangerous_cmd, data_json
-			FROM events
-		`
+		// UNION ALL across all event tables for a unified timeline.
+		sessionFilter := ""
 		var args []any
-		conditions := []string{}
 		if sid := c.Query("session_id"); sid != "" {
-			conditions = append(conditions, "session_id = ?")
+			sessionFilter = " WHERE session_id = ?"
 			args = append(args, sid)
 		}
-		if src := c.Query("source"); src != "" {
-			conditions = append(conditions, "source = ?")
-			args = append(args, src)
+
+		sourceFilter := c.Query("source")
+
+		// Build per-table queries.
+		type tableQuery struct {
+			source string
+			sql    string
+		}
+		tables := []tableQuery{
+			{"process", `SELECT id, session_id, event_time, 'process' AS source, pid, comm,
+				event_type, NULL AS tool_event_type, NULL AS tool_name, NULL AS tool_status,
+				filepath, net_ip, net_port, full_command, data_json
+				FROM events_process`},
+			{"tool_call", `SELECT id, session_id, event_time, 'tool_call' AS source, pid, comm,
+				NULL AS event_type, tool_event_type, tool_name, tool_status,
+				tool_key_field AS filepath, NULL AS net_ip, NULL AS net_port, NULL AS full_command, data_json
+				FROM events_tool_call`},
+			{"system", `SELECT id, session_id, event_time, 'system' AS source, pid, comm,
+				sys_type AS event_type, NULL AS tool_event_type, NULL AS tool_name, NULL AS tool_status,
+				NULL AS filepath, NULL AS net_ip, NULL AS net_port, NULL AS full_command, data_json
+				FROM events_system`},
+			{"ssl", `SELECT id, session_id, event_time, 'ssl' AS source, pid, comm,
+				NULL AS event_type, NULL AS tool_event_type, NULL AS tool_name, NULL AS tool_status,
+				NULL AS filepath, NULL AS net_ip, NULL AS net_port, NULL AS full_command, data_json
+				FROM events_ssl`},
+			{"http_parser", `SELECT id, session_id, event_time, 'http_parser' AS source, pid, comm,
+				NULL AS event_type, NULL AS tool_event_type, NULL AS tool_name, NULL AS tool_status,
+				http_path AS filepath, NULL AS net_ip, NULL AS net_port, http_method AS full_command, data_json
+				FROM events_http`},
+			{"sse_processor", `SELECT id, session_id, event_time, 'sse_processor' AS source, pid, comm,
+				NULL AS event_type, NULL AS tool_event_type, NULL AS tool_name, NULL AS tool_status,
+				NULL AS filepath, NULL AS net_ip, NULL AS net_port, NULL AS full_command, data_json
+				FROM events_sse`},
+			{"security", `SELECT id, session_id, event_time, 'security' AS source, pid, comm,
+				alert_type AS event_type, NULL AS tool_event_type, NULL AS tool_name, risk_level AS tool_status,
+				description AS filepath, NULL AS net_ip, NULL AS net_port, NULL AS full_command, data_json
+				FROM events_security`},
 		}
 
-		if len(conditions) > 0 {
-			query += " WHERE " + strings.Join(conditions, " AND ")
+		var parts []string
+		var queryArgs []any
+		for _, tq := range tables {
+			if sourceFilter != "" && tq.source != sourceFilter {
+				continue
+			}
+			q := tq.sql
+			if sessionFilter != "" {
+				q += sessionFilter
+			}
+			parts = append(parts, q)
+			queryArgs = append(queryArgs, args...)
 		}
-		query += " ORDER BY event_time DESC"
 
-		limit := c.DefaultQuery("limit", "1000")
-		query += " LIMIT " + limit
+		if len(parts) == 0 {
+			c.JSON(http.StatusOK, gin.H{"data": []any{}, "count": 0})
+			return
+		}
 
-		rows, err := db.Query(query, args...)
+		fullQuery := strings.Join(parts, " UNION ALL ") + " ORDER BY event_time DESC"
+
+		limit := parseLimit(c.Query("limit"), 1000)
+		fullQuery += " LIMIT ?"
+		queryArgs = append(queryArgs, limit)
+
+		rows, err := db.Query(fullQuery, queryArgs...)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -269,6 +309,21 @@ func handleTimeline(db *sql.DB) gin.HandlerFunc {
 		result := rowsToMaps(rows)
 		c.JSON(http.StatusOK, gin.H{"data": result, "count": len(result)})
 	}
+}
+
+// parseLimit safely parses a limit query parameter with a default and max cap.
+func parseLimit(s string, defaultVal int) int {
+	if s == "" {
+		return defaultVal
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 {
+		return defaultVal
+	}
+	if n > 10000 {
+		return 10000
+	}
+	return n
 }
 
 // rowsToMaps converts sql.Rows to a slice of maps for JSON serialization.

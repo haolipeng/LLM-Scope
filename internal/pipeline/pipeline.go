@@ -5,7 +5,7 @@ import (
 
 	pipelinecore "github.com/haolipeng/LLM-Scope/internal/pipeline/core"
 	pipelinetypes "github.com/haolipeng/LLM-Scope/internal/pipeline/types"
-	runtimeevent "github.com/haolipeng/LLM-Scope/internal/runtime/event"
+	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
 // Pipeline 将变换器和输出端组织成一条统一的事件处理流水线。
@@ -32,7 +32,7 @@ func (p *Pipeline) WithSinks(sinks ...pipelinetypes.Sink) *Pipeline {
 }
 
 // Process 将配置好的变换器和输出端连接到输入事件流上。
-func (p *Pipeline) Process(ctx context.Context, in <-chan *runtimeevent.Event) <-chan *runtimeevent.Event {
+func (p *Pipeline) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
 	stages := append([]pipelinetypes.Analyzer{}, p.transforms...)
 	if len(p.sinks) > 0 {
 		stages = append(stages, pipelinecore.AttachSinks(p.sinks...))
@@ -41,7 +41,7 @@ func (p *Pipeline) Process(ctx context.Context, in <-chan *runtimeevent.Event) <
 }
 
 // Drain 持续消费处理后的输出，直到流结束或上下文取消。
-func (p *Pipeline) Drain(ctx context.Context, in <-chan *runtimeevent.Event, fn func(*runtimeevent.Event)) {
+func (p *Pipeline) Drain(ctx context.Context, in <-chan *event.Event, fn func(*event.Event)) {
 	out := p.Process(ctx, in)
 	for event := range out {
 		if fn != nil {

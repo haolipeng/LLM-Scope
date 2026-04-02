@@ -3,8 +3,8 @@ package main
 import (
 	"os"
 
-	"github.com/haolipeng/LLM-Scope/internal/command"
-	systemcollector "github.com/haolipeng/LLM-Scope/internal/runtime/collectors/system"
+	"github.com/haolipeng/LLM-Scope/internal/pipeline"
+	systemcollector "github.com/haolipeng/LLM-Scope/internal/collectors/system"
 	"github.com/spf13/cobra"
 )
 
@@ -36,7 +36,7 @@ func init() {
 
 // runSystem 启动系统资源监控并连接 analyzer 管道
 func runSystem(cmd *cobra.Command, _ []string) {
-	err := command.Execute(command.ExecuteConfig{
+	err := pipeline.Execute(pipeline.ExecuteConfig{
 		Runner: systemcollector.New(systemcollector.Config{
 			IntervalSeconds: systemInterval,
 			PID:             systemPID,

@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/haolipeng/LLM-Scope/frontend"
-	agentsightserver "github.com/haolipeng/LLM-Scope/internal/interfaces/http"
+	agentsightserver "github.com/haolipeng/LLM-Scope/internal/httpserver"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )

@@ -3,10 +3,10 @@ package main
 import (
 	"os"
 
-	"github.com/haolipeng/LLM-Scope/internal/command"
+	"github.com/haolipeng/LLM-Scope/internal/pipeline"
 	pipelinetransforms "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
 	pipelinetypes "github.com/haolipeng/LLM-Scope/internal/pipeline/types"
-	sslcollector "github.com/haolipeng/LLM-Scope/internal/runtime/collectors/ssl"
+	sslcollector "github.com/haolipeng/LLM-Scope/internal/collectors/ssl"
 	"github.com/spf13/cobra"
 )
 
@@ -59,7 +59,7 @@ func runSSL(cmd *cobra.Command, args []string) {
 	}
 	analyzers = append(analyzers, pipelinetransforms.NewToolCallAggregator())
 
-	err := command.Execute(command.ExecuteConfig{
+	err := pipeline.Execute(pipeline.ExecuteConfig{
 		Runner: sslcollector.New(sslcollector.Config{
 			OpenSSL:    true,
 			BinaryPath: binaryPath,
