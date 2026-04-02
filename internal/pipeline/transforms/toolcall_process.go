@@ -3,6 +3,7 @@ package transforms
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 type toolCallExtraction struct {
@@ -57,6 +58,33 @@ func (e *processToolCallExtractor) extractExec(payload map[string]interface{}) [
 	}}
 }
 
+func isNoiseFilePath(filepath string) bool {
+	if strings.HasPrefix(filepath, "/proc/") {
+		return true
+	}
+	if strings.HasPrefix(filepath, "/sys/") || strings.HasPrefix(filepath, "/dev/") {
+		return true
+	}
+	if strings.HasPrefix(filepath, "/usr/lib/") ||
+		strings.HasPrefix(filepath, "/lib/") ||
+		strings.HasPrefix(filepath, "/usr/share/") {
+		return true
+	}
+	if strings.HasPrefix(filepath, "/etc/") {
+		return filepath == "/etc/ld.so.cache" || strings.HasPrefix(filepath, "/etc/ld.so")
+	}
+	if strings.HasSuffix(filepath, ".so") || strings.Contains(filepath, ".so.") {
+		return true
+	}
+	if strings.Contains(filepath, ".cursor-server/") {
+		return true
+	}
+	if strings.HasSuffix(filepath, ".lock") || strings.HasSuffix(filepath, ".pid") {
+		return true
+	}
+	return false
+}
+
 func (e *processToolCallExtractor) extractFileOpen(payload map[string]interface{}) []toolCallExtraction {
 	flagsValue, _ := toUint64(payload["flags"])
 	filepath := getStringValue(payload["filepath"], "")
@@ -66,6 +94,10 @@ func (e *processToolCallExtractor) extractFileOpen(payload map[string]interface{
 
 	toolName := classifyFileTool(flagsValue)
 	if toolName == "" {
+		return nil
+	}
+
+	if isNoiseFilePath(filepath) {
 		return nil
 	}
 
