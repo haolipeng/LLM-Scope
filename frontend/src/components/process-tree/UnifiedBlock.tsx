@@ -49,7 +49,7 @@ export function UnifiedBlock({ data, isExpanded, onToggle }: UnifiedBlockProps) 
     });
   };
 
-  const shouldShowExpandButton = data.expandedContent.length > 300;
+  const shouldShowExpandButton = data.expandedContent.length > 80;
   const handleToggle = () => {
     if (!shouldShowExpandButton) {
       return;

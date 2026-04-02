@@ -229,7 +229,11 @@ function determineEventType(source: string, data: any): ParsedEvent['type'] {
   if (isProcessEvent(source, data)) return 'process';
   if (source.toLowerCase().includes('ssl') || source === 'http_parser') return 'ssl';
   if (sourceStr === 'sse_processor') return 'response';
-  if (sourceStr === 'tool_call' || sourceStr === 'tool_call_start' || sourceStr === 'tool_call_end') return 'response';
+  if (sourceStr === 'tool_call') {
+    const toolName = String(data?.tool_name || '');
+    if (toolName.startsWith('fs.')) return 'file';
+    return 'process';
+  }
   return 'ssl';
 }
 
@@ -406,10 +410,12 @@ function parseSSLEvent(event: Event): ParsedEvent {
 
 function parseFileEvent(event: Event): ParsedEvent {
   const data = event.data;
-  const operation = data.operation || data.event || 'file op';
-  const path = data.path || data.filepath || 'unknown';
+  const isToolCall = event.source === 'tool_call';
+  const operation = isToolCall
+    ? (data.tool_name || data.event_type || 'tool_call')
+    : (data.operation || data.event || 'file op');
+  const path = data.path || data.filepath || data.key_field || 'unknown';
   
-  // Simply show the JSON data as-is
   const content = JSON.stringify(data, null, 2);
 
   return {
@@ -418,18 +424,25 @@ function parseFileEvent(event: Event): ParsedEvent {
     type: 'file',
     title: `${operation} ${path}`,
     content: content,
-    metadata: { ...data, original_source: event.source },
+    metadata: {
+      ...data,
+      operation,
+      filepath: path,
+      original_source: event.source,
+    },
     isExpanded: false
   };
 }
 
 function parseProcessEvent(event: Event): ParsedEvent {
   const data = event.data;
-  const eventType = data.event || 'process';
-  const filename = data.filename;
+  const isToolCall = event.source === 'tool_call';
+  const eventType = isToolCall
+    ? (data.tool_name || data.event_type || 'tool_call')
+    : (data.event || 'process');
+  const filename = data.filename || data.key_field;
   const title = filename ? `${eventType}: ${filename}` : `${eventType} event`;
   
-  // Simply show the JSON data as-is
   const content = JSON.stringify(data, null, 2);
 
   return {
@@ -438,7 +451,7 @@ function parseProcessEvent(event: Event): ParsedEvent {
     type: 'process',
     title,
     content: content,
-    metadata: { ...data, original_source: event.source },
+    metadata: { ...data, event: eventType, original_source: event.source },
     isExpanded: false
   };
 }
