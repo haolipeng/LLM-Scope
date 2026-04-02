@@ -3,10 +3,10 @@ package main
 import (
 	"os"
 
+	sslcollector "github.com/haolipeng/LLM-Scope/internal/collectors/ssl"
 	"github.com/haolipeng/LLM-Scope/internal/pipeline"
 	pipelinetransforms "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
 	pipelinetypes "github.com/haolipeng/LLM-Scope/internal/pipeline/types"
-	sslcollector "github.com/haolipeng/LLM-Scope/internal/collectors/ssl"
 	"github.com/spf13/cobra"
 )
 
@@ -78,7 +78,7 @@ func runSSL(cmd *cobra.Command, args []string) {
 		},
 	})
 	if err != nil {
-		cmd.PrintErrf("启动失败: %v\n", err)
+		cliErrf(cmd, "启动失败: %v\n", err)
 		os.Exit(1)
 	}
 }

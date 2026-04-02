@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/cilium/ebpf/rlimit"
@@ -13,6 +12,7 @@ import (
 	bpfstdio "github.com/haolipeng/LLM-Scope/internal/bpf/stdiocap"
 	runtimebase "github.com/haolipeng/LLM-Scope/internal/collectors/base"
 	"github.com/haolipeng/LLM-Scope/internal/event"
+	"github.com/haolipeng/LLM-Scope/internal/logging"
 )
 
 // Stdio event field offsets for struct stdiocap_event_t on x86_64.
@@ -63,7 +63,7 @@ func (r *Runner) Name() string { return "stdio" }
 
 func (r *Runner) Run(ctx context.Context) (<-chan *event.Event, error) {
 	if err := rlimit.RemoveMemlock(); err != nil {
-		log.Printf("[Stdio] warning: remove memlock: %v", err)
+		logging.Named("stdio").Warnf("remove memlock: %v", err)
 	}
 
 	spec, err := bpfstdio.LoadSpec()

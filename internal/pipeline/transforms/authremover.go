@@ -3,10 +3,10 @@ package transforms
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"strings"
 
 	"github.com/haolipeng/LLM-Scope/internal/event"
+	"github.com/haolipeng/LLM-Scope/internal/logging"
 )
 
 // AuthRemover 从 HTTP 事件中移除敏感认证头。
@@ -92,7 +92,7 @@ func (a *AuthRemover) stripHeaders(raw json.RawMessage) json.RawMessage {
 	}
 
 	if a.debug && len(removed) > 0 {
-		log.Printf("[AuthRemover] removed headers: %s", strings.Join(removed, ", "))
+		logging.Named("auth_remover").Infof("removed headers: %s", strings.Join(removed, ", "))
 	}
 
 	data["headers"] = headersRaw

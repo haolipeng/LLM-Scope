@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/haolipeng/LLM-Scope/internal/logging"
+	"go.uber.org/zap"
 )
 
 // registerAnalyticsRoutes adds the /api/analytics route group.
@@ -40,6 +42,7 @@ func handleQuery(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req queryRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
+			logging.NamedZap("api").Warn("bad request", zap.Error(err), zap.String("path", c.Request.URL.Path))
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
 			return
 		}
@@ -47,13 +50,14 @@ func handleQuery(db *sql.DB) gin.HandlerFunc {
 		trimmed := strings.TrimSpace(req.SQL)
 		upper := strings.ToUpper(trimmed)
 		if !strings.HasPrefix(upper, "SELECT") && !strings.HasPrefix(upper, "WITH") {
+			logging.NamedZap("api").Warn("sql not allowed", zap.String("path", c.Request.URL.Path))
 			c.JSON(http.StatusForbidden, gin.H{"error": "only SELECT/WITH queries are allowed"})
 			return
 		}
 
 		rows, err := db.Query(trimmed, req.Params...)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			respondInternalServerError(c, err)
 			return
 		}
 		defer rows.Close()
@@ -80,7 +84,7 @@ func handleView(db *sql.DB, query string) gin.HandlerFunc {
 
 		rows, err := db.Query(finalQuery, args...)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			respondInternalServerError(c, err)
 			return
 		}
 		defer rows.Close()
@@ -115,7 +119,7 @@ func handleToolCallLatency(db *sql.DB) gin.HandlerFunc {
 
 		rows, err := db.Query(query, args...)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			respondInternalServerError(c, err)
 			return
 		}
 		defer rows.Close()
@@ -144,7 +148,7 @@ func handleProcessTree(db *sql.DB) gin.HandlerFunc {
 
 		rows, err := db.Query(query, args...)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			respondInternalServerError(c, err)
 			return
 		}
 		defer rows.Close()
@@ -168,7 +172,7 @@ func handleHotFiles(db *sql.DB) gin.HandlerFunc {
 
 		rows, err := db.Query(query, args...)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			respondInternalServerError(c, err)
 			return
 		}
 		defer rows.Close()
@@ -194,7 +198,7 @@ func handleSecurityAlerts(db *sql.DB) gin.HandlerFunc {
 
 		rows, err := db.Query(query, args...)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			respondInternalServerError(c, err)
 			return
 		}
 		defer rows.Close()
@@ -216,7 +220,7 @@ func handleSessions(db *sql.DB) gin.HandlerFunc {
 		`
 		rows, err := db.Query(query)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			respondInternalServerError(c, err)
 			return
 		}
 		defer rows.Close()
@@ -301,7 +305,7 @@ func handleTimeline(db *sql.DB) gin.HandlerFunc {
 
 		rows, err := db.Query(fullQuery, queryArgs...)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			respondInternalServerError(c, err)
 			return
 		}
 		defer rows.Close()

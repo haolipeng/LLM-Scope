@@ -11,19 +11,21 @@ import (
 	"syscall"
 	"time"
 
-	agentsightserver "github.com/haolipeng/LLM-Scope/internal/httpserver"
-	pipelinesink "github.com/haolipeng/LLM-Scope/internal/pipeline/sink"
-	"github.com/haolipeng/LLM-Scope/internal/pipeline"
-	pipelinecore "github.com/haolipeng/LLM-Scope/internal/pipeline/core"
-	pipelinestream "github.com/haolipeng/LLM-Scope/internal/pipeline/stream"
-	pipelinetransforms "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
-	pipelinetypes "github.com/haolipeng/LLM-Scope/internal/pipeline/types"
 	processcollector "github.com/haolipeng/LLM-Scope/internal/collectors/process"
 	sslcollector "github.com/haolipeng/LLM-Scope/internal/collectors/ssl"
 	stdiocollector "github.com/haolipeng/LLM-Scope/internal/collectors/stdio"
 	systemcollector "github.com/haolipeng/LLM-Scope/internal/collectors/system"
 	"github.com/haolipeng/LLM-Scope/internal/event"
+	agentsightserver "github.com/haolipeng/LLM-Scope/internal/httpserver"
+	"github.com/haolipeng/LLM-Scope/internal/logging"
+	"github.com/haolipeng/LLM-Scope/internal/pipeline"
+	pipelinecore "github.com/haolipeng/LLM-Scope/internal/pipeline/core"
+	pipelinesink "github.com/haolipeng/LLM-Scope/internal/pipeline/sink"
+	pipelinestream "github.com/haolipeng/LLM-Scope/internal/pipeline/stream"
+	pipelinetransforms "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
+	pipelinetypes "github.com/haolipeng/LLM-Scope/internal/pipeline/types"
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 )
 
 // OutputConfig 输出和服务器配置
@@ -185,17 +187,28 @@ func runTrace(cmd *cobra.Command, _ []string) {
 // executeTrace 根据配置启动各 runner 和 analyzer 管道
 func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 	if !cfg.SSL.Enabled && !cfg.Process.Enabled && !cfg.System.Enabled && !cfg.Stdio.Enabled {
-		cmd.PrintErrln("至少启用一种监控类型 (--ssl/--process/--system/--stdio)")
+		cliErrln(cmd, "至少启用一种监控类型 (--ssl/--process/--system/--stdio)")
 		os.Exit(1)
 	}
 
 	if cfg.Stdio.Enabled && cfg.PID == 0 {
-		cmd.PrintErrln("--stdio 需要指定 --pid")
+		cliErrln(cmd, "--stdio 需要指定 --pid")
 		os.Exit(1)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	if err := logging.Init(logging.Config{
+		EventLogPath: cfg.Output.LogFile,
+		Rotate:       cfg.Output.RotateLogs,
+		MaxSizeMB:    cfg.Output.MaxLogSize,
+		Quiet:        cfg.Output.Quiet,
+	}); err != nil {
+		cliErrf(cmd, "应用日志初始化失败: %v\n", err)
+		os.Exit(1)
+	}
+	defer logging.Sync()
 
 	// allAnalyzers 收集所有 analyzer 实例，用于信号回调中上报指标
 	var allAnalyzers []pipelinetypes.Analyzer
@@ -245,7 +258,7 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 
 		events, err := sslRunner.Run(ctx)
 		if err != nil {
-			cmd.PrintErrf("启动 SSL 监控失败: %v\n", err)
+			cliErrf(cmd, "启动 SSL 监控失败: %v\n", err)
 			os.Exit(1)
 		}
 		sslStream := pipelinecore.Chain(sslAnalyzers...).Process(ctx, events)
@@ -291,7 +304,7 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 	combined := pipelinestream.NewCombinedRunner(runners...)
 	combinedStream, err := combined.Run(ctx)
 	if err != nil {
-		cmd.PrintErrf("启动监控失败: %v\n", err)
+		cliErrf(cmd, "启动监控失败: %v\n", err)
 		os.Exit(1)
 	}
 	merged := pipelinestream.MergeStreams(ctx, append(streams, combinedStream)...)
@@ -304,7 +317,7 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 			DBPath: cfg.Output.DuckDBPath,
 		})
 		if err != nil {
-			cmd.PrintErrf("启动 DuckDB 失败: %v\n", err)
+			cliErrf(cmd, "启动 DuckDB 失败: %v\n", err)
 			os.Exit(1)
 		}
 		sinks = append(sinks, duckdbSink)
@@ -351,7 +364,7 @@ func startServer(ctx context.Context, port int, analyticsDB *sql.DB) {
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			fmt.Fprintf(os.Stderr, "Web 服务器启动失败: %v\n", err)
+			logging.NamedZap("web").Error("Web 服务器启动失败", zap.Error(err))
 		}
 	}()
 
@@ -360,7 +373,7 @@ func startServer(ctx context.Context, port int, analyticsDB *sql.DB) {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
-			fmt.Fprintf(os.Stderr, "Web 服务器关闭失败: %v\n", err)
+			logging.NamedZap("web").Error("Web 服务器关闭失败", zap.Error(err))
 		}
 	}()
 }

@@ -3,10 +3,10 @@ package main
 import (
 	"os"
 
+	processcollector "github.com/haolipeng/LLM-Scope/internal/collectors/process"
 	"github.com/haolipeng/LLM-Scope/internal/pipeline"
 	pipelinetransforms "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
 	pipelinetypes "github.com/haolipeng/LLM-Scope/internal/pipeline/types"
-	processcollector "github.com/haolipeng/LLM-Scope/internal/collectors/process"
 	"github.com/spf13/cobra"
 )
 
@@ -52,7 +52,7 @@ func runProcess(cmd *cobra.Command, args []string) {
 		Quiet:      quiet,
 	})
 	if err != nil {
-		cmd.PrintErrf("启动失败: %v\n", err)
+		cliErrf(cmd, "启动失败: %v\n", err)
 		os.Exit(1)
 	}
 }

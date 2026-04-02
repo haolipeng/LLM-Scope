@@ -1,13 +1,14 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/haolipeng/LLM-Scope/frontend"
 	agentsightserver "github.com/haolipeng/LLM-Scope/internal/httpserver"
+	"github.com/haolipeng/LLM-Scope/internal/logging"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"go.uber.org/zap"
 )
 
 var (
@@ -54,7 +55,7 @@ func initConfig() {
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		logging.NamedZap("cmd").Error("命令执行失败", zap.Error(err))
 		os.Exit(1)
 	}
 }

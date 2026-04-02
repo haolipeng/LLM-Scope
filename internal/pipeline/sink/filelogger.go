@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"sync"
 
 	"github.com/haolipeng/LLM-Scope/internal/event"
+	"github.com/haolipeng/LLM-Scope/internal/logging"
+
+	"go.uber.org/zap"
 )
 
 // FileLogger 将每条事件以 JSONL 形式追加写入文件。
@@ -102,14 +104,14 @@ func (f *FileLogger) writeEvent(event *event.Event) {
 
 	if f.file == nil {
 		if err := f.openFile(); err != nil {
-			fmt.Fprintf(os.Stderr, "file logger: %v\n", err)
+			logging.NamedZap("file_logger").Error("open file", zap.Error(err))
 			return
 		}
 	}
 
 	payload, err := json.Marshal(event)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "file logger: marshal error: %v\n", err)
+		logging.NamedZap("file_logger").Error("marshal event", zap.Error(err))
 		return
 	}
 
@@ -138,11 +140,11 @@ func (f *FileLogger) maybeRotate() {
 
 	rotated := fmt.Sprintf("%s.1", f.path)
 	if err := os.Rename(f.path, rotated); err != nil {
-		log.Printf("file logger: rotate error: %v", err)
+		logging.NamedZap("file_logger").Error("rotate", zap.Error(err))
 	}
 
 	if err := f.openFile(); err != nil {
-		fmt.Fprintf(os.Stderr, "file logger: reopen after rotate: %v\n", err)
+		logging.NamedZap("file_logger").Error("reopen after rotate", zap.Error(err))
 	}
 }
 

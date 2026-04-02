@@ -13,7 +13,9 @@ import (
 
 // SetupRouter wires API routes and static assets.
 func SetupRouter(webAssets fs.FS, analyticsDB *sql.DB) *gin.Engine {
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(ginZapAccessLog())
 	r.Use(cors.Default())
 
 	api := r.Group("/api")

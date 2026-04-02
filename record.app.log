@@ -1,0 +1,81 @@
+{"level":"INFO","ts":"2026-04-02T20:15:17.474+0800","logger":"ssl","caller":"ssl/ssl.go:119","msg":"discovered libraries: openssl=/lib/x86_64-linux-gnu/libssl.so.3"}
+{"level":"INFO","ts":"2026-04-02T20:15:17.499+0800","logger":"ssl","caller":"ssl/ssl.go:132","msg":"attaching to binary: /opt/node-v22.20.0/bin/node"}
+{"level":"INFO","ts":"2026-04-02T20:15:17.799+0800","logger":"[SSL]","caller":"base/base.go:93","msg":"ReadLoop 启动"}
+{"level":"INFO","ts":"2026-04-02T20:15:18.237+0800","logger":"process","caller":"process/process.go:139","msg":"initial tracked PIDs: 1, filter_mode=2"}
+{"level":"INFO","ts":"2026-04-02T20:15:18.238+0800","logger":"[Process]","caller":"base/base.go:93","msg":"ReadLoop 启动"}
+{"level":"INFO","ts":"2026-04-02T20:15:21.655+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/","query":"","latency":0.006922311,"bytes":7957,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:21.711+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/_next/static/chunks/webpack-60d835819e29e072.js","query":"","latency":0.000234355,"bytes":3330,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:21.714+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/_next/static/css/fd192d65a9f24f5c.css","query":"","latency":0.003003268,"bytes":29807,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:21.754+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/_next/static/chunks/684-6a452647d1b79eca.js","query":"","latency":0.007316947,"bytes":175590,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:21.781+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/_next/static/chunks/main-app-17e9cc892e3badaf.js","query":"","latency":0.000094075,"bytes":518,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:21.782+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/_next/static/chunks/app/layout-ea3f5d98ed574b8b.js","query":"","latency":0.000293769,"bytes":10511,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:21.785+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/_next/static/chunks/337-449e830dba2292b1.js","query":"","latency":0.000391753,"bytes":9854,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:21.787+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/_next/static/chunks/app/page-898e9c19cec826f2.js","query":"","latency":0.000649866,"bytes":85329,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:21.792+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/_next/static/chunks/4bd1b696-21ba17ee59c40671.js","query":"","latency":0.047775401,"bytes":168413,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:22.081+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/favicon.ico","query":"","latency":0.000838637,"bytes":7957,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:28.323+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:15:38.190+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/api/analytics/timeline","query":"limit=10000","latency":0.006131377,"bytes":555,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:38.383+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":36,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:15:43.815+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/","query":"","latency":0.001726946,"bytes":7957,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:43.867+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/_next/static/chunks/webpack-60d835819e29e072.js","query":"","latency":0.000088962,"bytes":3330,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:43.871+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/_next/static/css/fd192d65a9f24f5c.css","query":"","latency":0.003776939,"bytes":29807,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:43.915+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/_next/static/chunks/4bd1b696-21ba17ee59c40671.js","query":"","latency":0.019795517,"bytes":168413,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:43.918+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/_next/static/chunks/main-app-17e9cc892e3badaf.js","query":"","latency":0.000054211,"bytes":518,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:43.918+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/_next/static/chunks/app/page-898e9c19cec826f2.js","query":"","latency":0.000208118,"bytes":85329,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:43.918+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/_next/static/chunks/app/layout-ea3f5d98ed574b8b.js","query":"","latency":0.000114078,"bytes":10511,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:43.918+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/_next/static/chunks/337-449e830dba2292b1.js","query":"","latency":0.00042867,"bytes":9854,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:43.948+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/_next/static/chunks/684-6a452647d1b79eca.js","query":"","latency":0.031579961,"bytes":175590,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:44.222+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/favicon.ico","query":"","latency":0.000826109,"bytes":7957,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:45.624+0800","logger":"http","caller":"httpserver/log_http.go:18","msg":"access","status":200,"method":"GET","path":"/api/analytics/timeline","query":"limit=10000","latency":0.016690319,"bytes":120235,"client_ip":"10.107.12.70"}
+{"level":"INFO","ts":"2026-04-02T20:15:48.322+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:15:58.324+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:16:08.322+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:16:18.324+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:16:28.323+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:16:38.342+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":10,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:16:43.345+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":3,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:16:48.322+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:16:58.321+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:17:08.322+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:17:18.323+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:17:28.321+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:17:38.326+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:17:48.321+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:17:58.323+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:18:08.322+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:18:18.321+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:18:28.322+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:18:38.322+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:18:48.320+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:18:58.321+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:19:08.321+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:19:18.321+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:19:28.321+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:19:38.323+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:19:43.445+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":77,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:19:48.322+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:19:58.323+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:20:08.324+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:20:18.324+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:20:28.322+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:20:38.322+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:20:48.321+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:20:58.325+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:21:08.321+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:21:18.322+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:21:28.321+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:21:38.329+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:21:48.322+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:21:58.325+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:22:08.321+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:22:18.322+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:22:28.322+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:22:38.322+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:22:48.321+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:22:58.322+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:23:08.322+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:23:18.324+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:23:28.322+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:23:38.321+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:23:48.359+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}
+{"level":"INFO","ts":"2026-04-02T20:23:58.324+0800","logger":"duckdb","caller":"sink/duckdb.go:239","msg":"flushed events","rows":1,"session":"20260402-201518"}

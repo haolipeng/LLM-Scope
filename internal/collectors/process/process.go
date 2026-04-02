@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"strings"
 
@@ -15,6 +14,7 @@ import (
 	bpfprocess "github.com/haolipeng/LLM-Scope/internal/bpf/process"
 	runtimebase "github.com/haolipeng/LLM-Scope/internal/collectors/base"
 	"github.com/haolipeng/LLM-Scope/internal/event"
+	"github.com/haolipeng/LLM-Scope/internal/logging"
 )
 
 const (
@@ -104,7 +104,7 @@ func (r *Runner) Name() string { return "process" }
 // Run 运行进程收集器
 func (r *Runner) Run(ctx context.Context) (<-chan *event.Event, error) {
 	if err := rlimit.RemoveMemlock(); err != nil {
-		log.Printf("[Process] warning: remove memlock: %v", err)
+		logging.Named("process").Warnf("remove memlock: %v", err)
 	}
 
 	commands := r.config.Commands
@@ -136,7 +136,7 @@ func (r *Runner) Run(ctx context.Context) (<-chan *event.Event, error) {
 	r.attachProbes()
 
 	tracked := r.tracker.PopulateFromProc()
-	log.Printf("[Process] initial tracked PIDs: %d, filter_mode=%d", tracked, filterMode)
+	logging.Named("process").Infof("initial tracked PIDs: %d, filter_mode=%d", tracked, filterMode)
 
 	if err := r.InitRingBuffer(r.objs.Rb); err != nil {
 		r.CloseLinks()
@@ -168,7 +168,7 @@ func (r *Runner) attachProbes() {
 
 	exe, err := link.OpenExecutable("/usr/bin/bash")
 	if err != nil {
-		log.Printf("[Process] warning: cannot open /usr/bin/bash for uretprobe: %v", err)
+		logging.Named("process").Warnf("cannot open /usr/bin/bash for uretprobe: %v", err)
 	} else {
 		r.AttachUretprobe(exe, "readline", r.objs.BashReadline)
 	}

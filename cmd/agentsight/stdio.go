@@ -3,8 +3,8 @@ package main
 import (
 	"os"
 
-	"github.com/haolipeng/LLM-Scope/internal/pipeline"
 	stdiocollector "github.com/haolipeng/LLM-Scope/internal/collectors/stdio"
+	"github.com/haolipeng/LLM-Scope/internal/pipeline"
 	"github.com/spf13/cobra"
 )
 
@@ -51,7 +51,7 @@ func runStdio(cmd *cobra.Command, _ []string) {
 		Quiet:      quiet,
 	})
 	if err != nil {
-		cmd.PrintErrf("启动失败: %v\n", err)
+		cliErrf(cmd, "启动失败: %v\n", err)
 		os.Exit(1)
 	}
 }

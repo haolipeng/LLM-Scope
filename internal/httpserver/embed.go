@@ -1,9 +1,12 @@
 package httpserver
 
 import (
-	"fmt"
 	"io/fs"
 	"os"
+
+	"github.com/haolipeng/LLM-Scope/internal/logging"
+
+	"go.uber.org/zap"
 )
 
 // embeddedFS is set by the main package at init time.
@@ -22,9 +25,10 @@ func WebAssets() fs.FS {
 	if dir := os.Getenv("AGENTSIGHT_FRONTEND_DIR"); dir != "" {
 		info, err := os.Stat(dir)
 		if err != nil || !info.IsDir() {
-			fmt.Fprintf(os.Stderr, "WARNING: AGENTSIGHT_FRONTEND_DIR=%q is not a valid directory, ignoring\n", dir)
+			logging.NamedZap("frontend").Warn("AGENTSIGHT_FRONTEND_DIR 不是有效目录，已忽略",
+				zap.String("dir", dir))
 		} else {
-			fmt.Fprintf(os.Stderr, "Serving frontend from disk: %s\n", dir)
+			logging.NamedZap("frontend").Info("从磁盘提供前端静态资源", zap.String("path", dir))
 			return os.DirFS(dir)
 		}
 	}
@@ -33,7 +37,7 @@ func WebAssets() fs.FS {
 	if embeddedFS != nil {
 		sub, err := fs.Sub(embeddedFS, "out")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "WARNING: failed to access embedded frontend: %v\n", err)
+			logging.NamedZap("frontend").Warn("无法访问内嵌前端资源", zap.Error(err))
 			return nil
 		}
 		return sub

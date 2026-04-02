@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/cilium/ebpf"
@@ -15,6 +14,7 @@ import (
 	bpfssl "github.com/haolipeng/LLM-Scope/internal/bpf/sslsniff"
 	runtimebase "github.com/haolipeng/LLM-Scope/internal/collectors/base"
 	"github.com/haolipeng/LLM-Scope/internal/event"
+	"github.com/haolipeng/LLM-Scope/internal/logging"
 )
 
 const (
@@ -69,7 +69,7 @@ func (r *Runner) Name() string { return "ssl" }
 
 func (r *Runner) Run(ctx context.Context) (<-chan *event.Event, error) {
 	if err := rlimit.RemoveMemlock(); err != nil {
-		log.Printf("[SSL] warning: remove memlock: %v", err)
+		logging.Named("ssl").Warnf("remove memlock: %v", err)
 	}
 
 	spec, err := bpfssl.LoadSpec()
@@ -116,7 +116,7 @@ func (r *Runner) Run(ctx context.Context) (<-chan *event.Event, error) {
 
 func (r *Runner) attachUprobes() error {
 	libs := discoverSSLLibraries(r.config.OpenSSL, r.config.GnuTLS, r.config.NSS)
-	log.Printf("[SSL] discovered libraries: %s", formatSSLLibInfo(libs))
+	logging.Named("ssl").Infof("discovered libraries: %s", formatSSLLibInfo(libs))
 
 	if path, ok := libs["openssl"]; ok {
 		r.attachLibUprobes(path, opensslUprobes)
@@ -129,7 +129,7 @@ func (r *Runner) attachUprobes() error {
 	}
 
 	if r.config.BinaryPath != "" {
-		log.Printf("[SSL] attaching to binary: %s", r.config.BinaryPath)
+		logging.Named("ssl").Infof("attaching to binary: %s", r.config.BinaryPath)
 		r.attachLibUprobes(r.config.BinaryPath, opensslUprobes)
 	}
 
@@ -142,7 +142,7 @@ func (r *Runner) attachUprobes() error {
 func (r *Runner) attachLibUprobes(libPath string, specs []sslUprobeSpec) {
 	exe, err := link.OpenExecutable(libPath)
 	if err != nil {
-		log.Printf("[SSL] warning: cannot open %s: %v", libPath, err)
+		logging.Named("ssl").Warnf("cannot open %s: %v", libPath, err)
 		return
 	}
 

@@ -5,14 +5,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
-	"os"
 	"sync"
 	"time"
 
 	_ "github.com/marcboeker/go-duckdb"
 
 	"github.com/haolipeng/LLM-Scope/internal/event"
+	"github.com/haolipeng/LLM-Scope/internal/logging"
+
+	"go.uber.org/zap"
 )
 
 // DuckDBConfig controls DuckDBSink behaviour.
@@ -176,7 +177,7 @@ func (s *DuckDBSink) flush() {
 
 	total := batch.total()
 	if err := s.insertBatch(&batch); err != nil {
-		fmt.Fprintf(os.Stderr, "duckdb: flush error (%d rows): %v\n", total, err)
+		logging.NamedZap("duckdb").Error("flush error", zap.Int("rows", total), zap.Error(err))
 	}
 }
 
@@ -235,7 +236,10 @@ func (s *DuckDBSink) insertBatch(batch *bufferedEvents) error {
 	}
 
 	total := batch.total()
-	log.Printf("duckdb: flushed %d events (session=%s)", total, s.cfg.SessionID)
+	logging.NamedZap("duckdb").Info("flushed events",
+		zap.Int("rows", total),
+		zap.String("session", s.cfg.SessionID),
+	)
 	return nil
 }
 

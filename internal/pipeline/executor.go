@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/haolipeng/LLM-Scope/internal/logging"
 	pipelinesink "github.com/haolipeng/LLM-Scope/internal/pipeline/sink"
 	pipelinetypes "github.com/haolipeng/LLM-Scope/internal/pipeline/types"
 )
@@ -24,6 +25,16 @@ type ExecuteConfig struct {
 
 // Execute 启动 Runner 并驱动 analyzer 管道直到 ctx 结束
 func Execute(cfg ExecuteConfig) error {
+	if err := logging.Init(logging.Config{
+		EventLogPath: cfg.LogFile,
+		Rotate:       cfg.RotateLogs,
+		MaxSizeMB:    cfg.MaxLogSize,
+		Quiet:        cfg.Quiet,
+	}); err != nil {
+		return err
+	}
+	defer logging.Sync()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
