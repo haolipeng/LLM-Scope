@@ -7,11 +7,14 @@ const createSequenceSQL = `CREATE SEQUENCE IF NOT EXISTS event_id_seq START 1;`
 
 const createSessionsTableSQL = `
 CREATE TABLE IF NOT EXISTS sessions (
-    session_id    VARCHAR PRIMARY KEY,
-    start_time    TIMESTAMP,
-    end_time      TIMESTAMP,
-    comm_filter   VARCHAR,
-    binary_path   VARCHAR
+    session_id      VARCHAR PRIMARY KEY,
+    start_time      TIMESTAMP,
+    end_time        TIMESTAMP,
+    comm_filter     VARCHAR,
+    binary_path     VARCHAR,
+    hostname        VARCHAR,
+    kernel_version  VARCHAR,
+    labels          JSON
 );
 `
 
@@ -158,6 +161,31 @@ CREATE TABLE IF NOT EXISTS events_security (
 );
 `
 
+const createProcessTreeTableSQL = `
+CREATE TABLE IF NOT EXISTS process_tree (
+    session_id  VARCHAR NOT NULL,
+    pid         UINTEGER NOT NULL,
+    ppid        UINTEGER,
+    comm        VARCHAR,
+    filename    VARCHAR,
+    start_time  TIMESTAMP,
+    end_time    TIMESTAMP,
+    depth       UINTEGER,
+    PRIMARY KEY (session_id, pid)
+);
+`
+
+const createEventLinksTableSQL = `
+CREATE TABLE IF NOT EXISTS event_links (
+    session_id      VARCHAR NOT NULL,
+    source_table    VARCHAR NOT NULL,
+    source_id       UBIGINT NOT NULL,
+    target_table    VARCHAR NOT NULL,
+    target_id       UBIGINT NOT NULL,
+    link_type       VARCHAR NOT NULL
+);
+`
+
 // Analytics views that query across the split tables.
 
 const createViewSessionOverviewSQL = `
@@ -255,6 +283,7 @@ WHERE e.event_type = 'EXEC';
 const createViewSecurityAlertsSQL = `
 CREATE OR REPLACE VIEW v_security_alerts AS
 SELECT
+    id,
     session_id,
     event_time,
     pid,
@@ -264,7 +293,8 @@ SELECT
     description,
     source_table,
     source_event_id,
-    evidence_json
+    evidence_json,
+    data_json
 FROM events_security
 ORDER BY event_time DESC;
 `
@@ -358,6 +388,8 @@ var allSchemaSQL = []string{
 	createEventsHTTPTableSQL,
 	createEventsSSETableSQL,
 	createEventsSecurityTableSQL,
+	createProcessTreeTableSQL,
+	createEventLinksTableSQL,
 	createViewSessionOverviewSQL,
 	createViewToolCallStatsSQL,
 	createViewProcessLifecycleSQL,

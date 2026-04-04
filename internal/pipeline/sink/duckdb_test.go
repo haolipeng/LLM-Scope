@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -262,6 +263,66 @@ func TestDuckDB_InsertSecurityEvent(t *testing.T) {
 	_ = evidenceJSON // verified the insert works; the evidence field was stored
 }
 
+func TestDuckDB_SecuritySourceEventIDFromStreamSeq(t *testing.T) {
+	sink := openTestDB(t)
+	defer sink.Close()
+
+	// Use an explicit StreamSeq so the test is independent of global counter.
+	procSeq := event.NextStreamSeq()
+
+	procData, err := json.Marshal(map[string]interface{}{
+		"event":    "FILE_OPEN",
+		"filepath": "/etc/shadow",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink.addEvent(&event.Event{
+		StreamSeq:       procSeq,
+		TimestampNs:     1000,
+		TimestampUnixMs: 1700000000000,
+		Source:          "process",
+		PID:             1,
+		Comm:            "sh",
+		Data:            procData,
+	})
+
+	secData := map[string]interface{}{
+		"alert_type":        "sensitive_file_access",
+		"risk_level":        "high",
+		"description":       "test",
+		"source_table":      "events_process",
+		"source_stream_seq": fmt.Sprintf("%d", procSeq),
+		"evidence":          []interface{}{},
+	}
+	secJSON, err := json.Marshal(secData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink.addEvent(&event.Event{
+		TimestampNs:     2000,
+		TimestampUnixMs: 1700000000001,
+		Source:          "security",
+		PID:             1,
+		Comm:            "sh",
+		Data:            secJSON,
+	})
+
+	sink.flush()
+
+	var procID uint64
+	if err := sink.DB().QueryRow(`SELECT id FROM events_process LIMIT 1`).Scan(&procID); err != nil {
+		t.Fatal(err)
+	}
+	var srcID sql.NullInt64
+	if err := sink.DB().QueryRow(`SELECT source_event_id FROM events_security LIMIT 1`).Scan(&srcID); err != nil {
+		t.Fatal(err)
+	}
+	if !srcID.Valid || uint64(srcID.Int64) != procID {
+		t.Fatalf("source_event_id want %d, got %v", procID, srcID)
+	}
+}
+
 func TestDuckDB_BatchInsertMixed(t *testing.T) {
 	sink := openTestDB(t)
 	defer sink.Close()
@@ -429,7 +490,7 @@ func TestDuckDB_BatchFlush(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "batch.duckdb")
 	sink, err := NewDuckDBSink(DuckDBConfig{
 		DBPath:        dbPath,
-		BatchSize:     5,
+		BatchSize:     10, // 5 process rows + 5 process_tree rows = 10
 		FlushInterval: 10 * time.Second, // very long, won't trigger
 		SessionID:     "batch-test",
 	})

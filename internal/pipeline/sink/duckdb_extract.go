@@ -12,6 +12,7 @@ import (
 // ---------- Per-table row types ----------
 
 type baseRow struct {
+	streamSeq     uint64
 	sessionID     string
 	timestampNs   int64
 	timestampUnix int64
@@ -93,18 +94,39 @@ type sseRow struct {
 
 type securityRow struct {
 	baseRow
-	alertType     *string
-	riskLevel     *string
-	description   *string
-	sourceTable   *string
-	sourceEventID *uint64
-	evidenceJSON  *string
+	alertType         *string
+	riskLevel         *string
+	description       *string
+	sourceTable       *string
+	sourceStreamSeq   uint64
+	sourceEventID     *uint64
+	evidenceJSON      *string
+}
+
+type processTreeRow struct {
+	sessionID string
+	pid       uint32
+	ppid      *uint32
+	comm      string
+	filename  *string
+	startTime time.Time
+	depth     *uint32
+}
+
+type eventLinkRow struct {
+	sessionID   string
+	sourceTable string
+	sourceID    uint64
+	targetTable string
+	targetID    uint64
+	linkType    string
 }
 
 // ---------- Extraction functions ----------
 
 func extractBase(event *event.Event, sessionID string) baseRow {
 	return baseRow{
+		streamSeq:     event.StreamSeq,
 		sessionID:     sessionID,
 		timestampNs:   event.TimestampNs,
 		timestampUnix: event.TimestampUnixMs,
@@ -272,6 +294,10 @@ func extractSecurityRow(event *event.Event, sessionID string) securityRow {
 	row.description = getStringPtr(data, "description")
 	row.sourceTable = getStringPtr(data, "source_table")
 
+	if u, ok := parseStreamSeqField(data, "source_stream_seq"); ok {
+		row.sourceStreamSeq = u
+	}
+
 	if eid, ok := data["source_event_id"].(float64); ok {
 		u := uint64(eid)
 		row.sourceEventID = &u
@@ -285,6 +311,68 @@ func extractSecurityRow(event *event.Event, sessionID string) securityRow {
 	}
 
 	return row
+}
+
+// extractProcessTreeRow builds a process_tree row from an EXEC process event.
+// Returns (row, true) for EXEC events, (zero, false) otherwise.
+func extractProcessTreeRow(e *event.Event, sessionID string) (processTreeRow, bool) {
+	var data map[string]interface{}
+	if err := json.Unmarshal(e.Data, &data); err != nil {
+		return processTreeRow{}, false
+	}
+	et := getString(data, "event")
+	if et != "EXEC" {
+		return processTreeRow{}, false
+	}
+	row := processTreeRow{
+		sessionID: sessionID,
+		pid:       e.PID,
+		comm:      e.Comm,
+		filename:  getStringPtr(data, "filename"),
+		startTime: e.Time(),
+	}
+	row.ppid = getUint32Ptr(data, "ppid")
+	return row, true
+}
+
+// parseStreamSeqField reads source_stream_seq as string or JSON number (uint64-safe via string path).
+func parseStreamSeqField(m map[string]interface{}, key string) (uint64, bool) {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return 0, false
+	}
+	switch val := v.(type) {
+	case string:
+		if val == "" {
+			return 0, false
+		}
+		u, err := strconv.ParseUint(strings.TrimSpace(val), 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return u, true
+	case float64:
+		if val < 0 || val > float64(^uint64(0)) {
+			return 0, false
+		}
+		return uint64(val), true
+	case json.Number:
+		u, err := strconv.ParseUint(string(val), 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return u, true
+	default:
+		s := strings.TrimSpace(jsonStr(v))
+		if s == "" {
+			return 0, false
+		}
+		u, err := strconv.ParseUint(s, 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return u, true
+	}
 }
 
 // ---------- JSON field helpers ----------
