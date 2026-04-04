@@ -73,28 +73,32 @@ func (s *SecurityAnalyzer) Process(ctx context.Context, in <-chan *event.Event) 
 			select {
 			case <-ctx.Done():
 				return
-			case event, ok := <-in:
+			case ev, ok := <-in:
 				if !ok {
 					return
 				}
+				// Assign stream sequence before forwarding so security alerts can reference this row id after DuckDB insert.
+				if ev.StreamSeq == 0 {
+					ev.StreamSeq = event.NextStreamSeq()
+				}
 				// Always forward the original event.
-				out <- event
+				out <- ev
 
 				// Skip events that are already security alerts.
-				if event.Source == "security" {
+				if ev.Source == "security" {
 					continue
 				}
 
 				// Parse data once for all rules.
 				var data map[string]interface{}
-				if err := json.Unmarshal(event.Data, &data); err != nil {
+				if err := json.Unmarshal(ev.Data, &data); err != nil {
 					continue
 				}
 
 				// Check each rule.
 				for _, rule := range s.rules {
-					if alert := rule.Check(event, data); alert != nil {
-						out <- buildSecurityEvent(event, alert)
+					if alert := rule.Check(ev, data); alert != nil {
+						out <- buildSecurityEvent(ev, alert)
 					}
 				}
 			}
@@ -119,11 +123,12 @@ func buildSecurityEvent(original *event.Event, alert *SecurityAlert) *event.Even
 	evidenceJSON, _ := json.Marshal(alert.Evidence)
 
 	payload := map[string]interface{}{
-		"alert_type":   alert.AlertType,
-		"risk_level":   alert.RiskLevel,
-		"description":  alert.Description,
-		"source_table": sourceToTable(original.Source),
-		"evidence":     json.RawMessage(evidenceJSON),
+		"alert_type":         alert.AlertType,
+		"risk_level":         alert.RiskLevel,
+		"description":        alert.Description,
+		"source_table":       sourceToTable(original.Source),
+		"source_stream_seq":  strconv.FormatUint(original.StreamSeq, 10),
+		"evidence":           json.RawMessage(evidenceJSON),
 	}
 	data, _ := json.Marshal(payload)
 
