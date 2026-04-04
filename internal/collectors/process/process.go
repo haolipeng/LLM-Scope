@@ -258,7 +258,8 @@ func (r *Runner) handleProcessEvent(pid, ppid int32, exitCode uint32, durationNs
 		}
 	} else {
 		filename := cStringFromBytes(unionData[:fileOpFilepathLen])
-		if r.tracker.ShouldTrackProcess(comm, pid, ppid) {
+		shouldTrack := r.tracker.ShouldTrackProcess(comm, pid, ppid)
+		if shouldTrack {
 			r.tracker.Add(pid, ppid)
 			data := map[string]interface{}{
 				"timestamp":    timestampNs,
