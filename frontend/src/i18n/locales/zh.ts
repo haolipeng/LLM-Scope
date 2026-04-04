@@ -27,6 +27,8 @@ export const zh: Record<TranslationKey, string> = {
   'app.noEventsLoaded': '\u6682\u65e0\u4e8b\u4ef6\u6570\u636e',
   'app.syncFromServer': '\u4ece\u670d\u52a1\u5668\u540c\u6b65\u6570\u636e',
   'app.uploadLogFile': '\u4e0a\u4f20\u65e5\u5fd7\u6587\u4ef6',
+  'app.securityAlerts': '\u5b89\u5168\u544a\u8b66',
+  'app.sessionFilter': '\u4f1a\u8bdd\uff1a{id}',
 
   // Upload
   'upload.title': '\u4e0a\u4f20\u65e5\u5fd7\u6587\u4ef6',
@@ -155,4 +157,35 @@ export const zh: Record<TranslationKey, string> = {
   // Log
   'log.noEvents': '\u6ca1\u6709\u627e\u5230\u5339\u914d\u5f53\u524d\u7b5b\u9009\u6761\u4ef6\u7684\u4e8b\u4ef6\u3002',
   'log.eventDetails': '\u65e5\u5fd7\u4e8b\u4ef6\u8be6\u60c5',
+
+  // Security alerts
+  'security.title': '\u5b89\u5168\u544a\u8b66',
+  'security.subtitle': '\u57fa\u4e8e\u5b89\u5168\u5206\u6790\u89c4\u5219\u7684\u544a\u8b66\uff08DuckDB v_security_alerts\uff09\u3002',
+  'security.backHome': '\u8fd4\u56de\u9996\u9875',
+  'security.backList': '\u8fd4\u56de\u5217\u8868',
+  'security.loading': '\u52a0\u8f7d\u4e2d\u2026',
+  'security.empty': '\u6570\u636e\u5e93\u4e2d\u6682\u65e0\u5b89\u5168\u544a\u8b66\u3002',
+  'security.emptyHint':
+    '\u544a\u8b66\u4ec5\u5728\u5f69\u96c6\u4e14\u5b89\u5168\u5206\u6790\u89c4\u5219\u547d\u4e2d\u65f6\u5199\u5165 DuckDB\uff08\u5982\u654f\u611f\u6587\u4ef6\u8bbf\u95ee\u3001\u5371\u9669\u547d\u4ee4\u7b49\uff09\u3002\u82e5\u53ea\u6253\u5f00 Web \u672a\u8fd0\u884c record/trace\uff0c\u6216\u76d1\u63a7\u7684\u8fdb\u7a0b\u672a\u89e6\u53d1\u4efb\u4f55\u89c4\u5219\uff0c\u5217\u8868\u4f1a\u4e3a\u7a7a\u3002\n\n\u8bf7\u4f7f\u7528 agentsight record \u6216 trace\uff0c\u5e76\u542f\u7528 DuckDB\uff08\u9ed8\u8ba4 --duckdb-path agentsight.duckdb\uff0c\u4e0e Web \u8bfb\u7684\u662f\u540c\u4e00\u6587\u4ef6\uff09\uff0c\u518d\u590d\u73b0\u53ef\u89e6\u53d1\u89c4\u5219\u7684\u64cd\u4f5c\u3002',
+  'security.alertNotFound': '\u672a\u627e\u5230\u8be5\u544a\u8b66\u3002',
+  'security.colId': 'ID',
+  'security.colTime': '\u65f6\u95f4',
+  'security.colType': '\u7c7b\u578b',
+  'security.colRisk': '\u98ce\u9669',
+  'security.colSession': '\u4f1a\u8bdd',
+  'security.colDesc': '\u63cf\u8ff0',
+  'security.session': '\u4f1a\u8bdd ID',
+  'security.eventTime': '\u4e8b\u4ef6\u65f6\u95f4',
+  'security.process': '\u8fdb\u7a0b',
+  'security.sourceTable': '\u6765\u6e90\u8868',
+  'security.sourceEventId': '\u6e90\u4e8b\u4ef6 ID',
+  'security.evidence': '\u8bc1\u636e\u94fe',
+  'security.evSource': '\u6765\u6e90\u8868',
+  'security.evType': '\u4e8b\u4ef6\u7c7b\u578b',
+  'security.evComm': 'Comm',
+  'security.evTs': 'timestamp_ns',
+  'security.evDetail': '\u7ec6\u8282',
+  'security.noEvidence': '\u65e0\u7ed3\u6784\u5316\u8bc1\u636e\u884c\u3002',
+  'security.rawPayload': '\u539f\u59cb\u8f7d\u8377\uff08data_json\uff09',
+  'security.openTimeline': '\u5728\u9996\u9875\u65f6\u95f4\u7ebf\u4e2d\u6253\u5f00',
 };

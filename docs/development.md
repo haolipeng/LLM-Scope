@@ -22,7 +22,8 @@ After each frontend change:
 
 ```sh
 make build-frontend
-# Restart agentsight — no need to recompile Go
+# No agentsight restart or Go rebuild needed: disk assets are read per request via os.DirFS
+# Hard-refresh the browser (Ctrl+Shift+R) if you still see stale HTML
 ```
 
 For live development with hot reload:
@@ -33,8 +34,18 @@ sudo ./agentsight record -c python --server-port 7395
 
 # Terminal 2: Start Next.js dev server
 make frontend-dev
-# Dev server runs on http://localhost:3000, proxies API to :7395
+# Dev server listens on 0.0.0.0:3000 (use http://localhost:3000 or http://<host-ip>:3000)
+# Open :3000 in the browser — not :7395 (see “Hot reload vs :7395” below)
 ```
+
+### Hot reload vs `:7395`
+
+| URL | Served by | After editing `src/` |
+|-----|-----------|----------------------|
+| **`:3000`** (`make frontend-dev`) | Next.js dev server, **hot reload** | Save files; UI updates without rebuilding Go |
+| **`:7395`** | Embedded `frontend/out` or `AGENTSIGHT_FRONTEND_DIR` static files | **No** Next hot reload. With **`AGENTSIGHT_FRONTEND_DIR`**: run `make build-frontend` only — **restart usually unnecessary** (served from disk each request); hard-refresh if the browser caches HTML. **Without** it: `make build-frontend && make build-go` and replace/restart the binary |
+
+Use **`:3000`** to verify UI changes when using the two-terminal workflow.
 
 ### How It Works
 
@@ -136,37 +147,6 @@ agentsight_go/
 ├── Makefile                  # Build system
 ├── go.mod / go.sum           # Go module definition
 └── CLAUDE.md                 # Claude Code development guidance
-```
-
-## Key Go Interfaces
-
-All core interfaces are defined in `internal/pipeline/types/types.go`:
-
-```go
-// Runner produces events from a data source (eBPF, /proc, etc.)
-type Runner interface {
-    ID() string
-    Name() string
-    Run(ctx context.Context) (<-chan *runtimeevent.Event, error)
-    Stop() error
-}
-
-// Analyzer transforms an input event stream into an output event stream
-type Analyzer interface {
-    Name() string
-    Process(ctx context.Context, in <-chan *runtimeevent.Event) <-chan *runtimeevent.Event
-}
-
-// Sink consumes events for side effects (logging, export) without producing output
-type Sink interface {
-    Name() string
-    Consume(ctx context.Context, in <-chan *runtimeevent.Event)
-}
-
-// MetricsReporter is an optional interface for analyzers that report metrics
-type MetricsReporter interface {
-    ReportMetrics()
-}
 ```
 
 ## Adding a New Analyzer
@@ -300,13 +280,20 @@ package myprogram
 
 6. **Register the CLI command**: Add a new command file in `cmd/agentsight/` or integrate into existing `trace` command
 
+## Faster `build-frontend`
+
+- **Incremental**: `make build-frontend` only re-runs when `frontend/src/` (and related config) changes; if you did not touch the frontend, Make skips work.
+- **Turbopack**: By default, `next build --turbopack` is used (Next 15.3+), which is usually faster than webpack. For the classic bundler:  
+  `FRONTEND_WEBPACK=1 make build-frontend`
+- **Day-to-day UI work**: Prefer `make frontend-dev` on port 3000 instead of exporting every time.
+
 ## Build System
 
 | Makefile Target | Description |
 |----------------|-------------|
 | `make build-all` | Full build: BPF generation + frontend + Go binary |
 | `make build-bpf` | Generate BPF Go bindings via `go generate ./internal/bpf/...` |
-| `make build-frontend` | Build Next.js frontend as static export to `frontend/out/` |
+| `make build-frontend` | Static export to `frontend/out/` (Turbopack by default; `FRONTEND_WEBPACK=1` for webpack) |
 | `make build-go` | Compile Go binary (uses existing BPF bindings) |
 | `make frontend-dev` | Start Next.js development server with hot reload |
 | `make deps` | Install all dependencies (Go modules, bpf2go, npm packages) |

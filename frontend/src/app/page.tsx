@@ -3,7 +3,9 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { LogView } from '@/components/LogView';
 import { TimelineView } from '@/components/TimelineView';
 import { ProcessTreeView } from '@/components/ProcessTreeView';
@@ -19,8 +21,10 @@ type ViewMode = 'log' | 'timeline' | 'process-tree' | 'metrics';
 // Go backend URL for direct SSE connection (bypasses Next.js proxy which may buffer SSE)
 const GO_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:7395';
 
-export default function Home() {
+function HomeContent() {
   const { t } = useTranslation();
+  const searchParams = useSearchParams();
+  const sessionFilter = searchParams.get('session_id');
   const [file, setFile] = useState<File | null>(null);
   const [logContent, setLogContent] = useState<string>('');
   const [events, setEvents] = useState<Event[]>([]);
@@ -107,16 +111,21 @@ export default function Home() {
     }
   };
 
-  const syncData = async () => {
+  const syncData = useCallback(async (sessionId?: string | null) => {
     setSyncing(true);
     setError('');
 
     try {
+      const qs = new URLSearchParams({ limit: '10000' });
+      if (sessionId) {
+        qs.set('session_id', sessionId);
+      }
+      const timelinePath = `/api/analytics/timeline?${qs.toString()}`;
       let response: Response;
       try {
-        response = await fetch('/api/analytics/timeline?limit=10000');
+        response = await fetch(timelinePath);
       } catch {
-        response = await fetch(`${GO_BACKEND_URL}/api/analytics/timeline?limit=10000`);
+        response = await fetch(`${GO_BACKEND_URL}${timelinePath}`);
       }
 
       if (!response.ok) {
@@ -166,10 +175,16 @@ export default function Home() {
     } finally {
       setSyncing(false);
     }
-  };
+  }, []);
 
-  // Load data from localStorage on component mount
+  // Deep link: /?session_id=... → timeline + server sync for that session
   useEffect(() => {
+    const sid = searchParams.get('session_id');
+    if (sid) {
+      setViewMode('timeline');
+      void syncData(sid);
+      return;
+    }
     const savedContent = localStorage.getItem('agent-tracer-log');
     const savedEvents = localStorage.getItem('agent-tracer-events');
 
@@ -178,8 +193,7 @@ export default function Home() {
       setEvents(JSON.parse(savedEvents));
       setIsParsed(true);
     }
-    // Auto-sync disabled - user must manually sync data
-  }, []);
+  }, [searchParams, syncData]);
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const uploadedFile = event.target.files?.[0];
@@ -218,7 +232,8 @@ export default function Home() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {/* Header */}
         <div className="text-center mb-8 relative">
-          <div className="absolute right-0 top-0">
+          {/* z-10: h1 below is full-width and would otherwise capture clicks on this corner */}
+          <div className="absolute right-0 top-0 z-10 flex items-center gap-3">
             <LanguageSwitcher />
           </div>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
@@ -249,6 +264,11 @@ export default function Home() {
               <div className="flex items-center space-x-4">
                 <div className="text-sm text-gray-600">
                   {t('app.eventsLoaded', { count: events.length })}
+                  {sessionFilter && (
+                    <span className="ml-2 text-blue-700">
+                      · {t('app.sessionFilter', { id: sessionFilter })}
+                    </span>
+                  )}
                 </div>
 
                 {file && (
@@ -266,9 +286,19 @@ export default function Home() {
 
               </div>
 
-              <div className="flex items-center space-x-4">
-                {/* View Mode Toggle */}
-                <div className="flex rounded-lg border border-gray-200 p-1">
+              <div className="flex items-center flex-wrap gap-x-4 gap-y-2">
+                {/* Security link + view modes share one bordered control */}
+                <div className="flex items-center rounded-lg border border-gray-200 p-1">
+                  <Link
+                    href="/security/alerts/"
+                    className="px-3 py-1 text-sm rounded-md transition-colors text-amber-800 hover:bg-amber-50 shrink-0"
+                  >
+                    {t('app.securityAlerts')}
+                  </Link>
+                  <span
+                    className="w-px self-stretch min-h-[1.25rem] bg-gray-200 my-0.5 shrink-0"
+                    aria-hidden
+                  />
                   <button
                     onClick={() => setViewMode('log')}
                     className={`px-3 py-1 text-sm rounded-md transition-colors ${
@@ -320,7 +350,7 @@ export default function Home() {
                 </button>
 
                 <button
-                  onClick={syncData}
+                  onClick={() => syncData(sessionFilter)}
                   disabled={syncing}
                   className="px-4 py-2 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-md transition-colors border border-blue-300 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
@@ -361,7 +391,7 @@ export default function Home() {
                     <p className="text-lg mb-4">{t('app.noEventsLoaded')}</p>
                     <div className="space-x-4">
                       <button
-                        onClick={syncData}
+                        onClick={() => syncData(sessionFilter)}
                         className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors"
                       >
                         {t('app.syncFromServer')}
@@ -381,5 +411,19 @@ export default function Home() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-600">
+          Loading…
+        </div>
+      }
+    >
+      <HomeContent />
+    </Suspense>
   );
 }

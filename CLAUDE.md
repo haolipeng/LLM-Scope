@@ -50,6 +50,10 @@ sudo ./agentsight trace --ssl true --process true --system true --comm claude
 # Web UI available at http://127.0.0.1:7395 when using record or trace with --server
 ```
 
+### Security alerts (Claude Code)
+
+Process-based security rules only see events from the **tracked process tree** (`--comm` matches `/proc/.../comm`, plus descendants). If you monitor **`-c claude`**, running a separate shell script in another terminal **will not** produce valid alerts for that session—invoke equivalent commands **from Claude Code’s terminal / agent** so child processes stay under the tracked tree. See **`scripts/security-alerts-claude-code.md`**. For UI-only DB rows without eBPF, use **`agentsight mock-data`**.
+
 ## Architecture
 
 ```

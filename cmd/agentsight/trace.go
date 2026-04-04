@@ -314,7 +314,9 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 	var sinks []pipelinetypes.Sink
 	if cfg.Output.DuckDBPath != "" {
 		duckdbSink, err := pipelinesink.NewDuckDBSink(pipelinesink.DuckDBConfig{
-			DBPath: cfg.Output.DuckDBPath,
+			DBPath:     cfg.Output.DuckDBPath,
+			CommFilter: cfg.Comm,
+			BinaryPath: cfg.SSL.BinaryPath,
 		})
 		if err != nil {
 			cliErrf(cmd, "启动 DuckDB 失败: %v\n", err)

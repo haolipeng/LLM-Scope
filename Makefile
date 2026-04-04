@@ -17,7 +17,12 @@ LDFLAGS := -ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
 BPF_SOURCES := $(shell find bpf/ -name '*.c' -o -name '*.h' 2>/dev/null)
 GO_SOURCES  := $(shell find . -name '*.go' -not -path './frontend/*' -not -path './.build-stamps/*' 2>/dev/null)
 FE_SOURCES  := $(shell find $(FRONTEND_DIR)/src/ -name '*.ts' -o -name '*.tsx' -o -name '*.css' -o -name '*.json' 2>/dev/null) \
-               $(FRONTEND_DIR)/next.config.js $(FRONTEND_DIR)/tailwind.config.ts $(FRONTEND_DIR)/package.json
+               $(shell find $(FRONTEND_DIR)/public/ -type f 2>/dev/null) \
+               $(FRONTEND_DIR)/next.config.js $(FRONTEND_DIR)/tailwind.config.ts $(FRONTEND_DIR)/postcss.config.mjs \
+               $(FRONTEND_DIR)/package.json
+
+# Next.js 15.3+：`next build --turbopack` 通常比 webpack 快（静态导出已验证可用）。若需经典打包器，设置 FRONTEND_WEBPACK=1。
+FRONTEND_NEXT_EXTRA := $(if $(FRONTEND_WEBPACK),,-- --turbopack)
 
 .PHONY: all build quick force-all build-bpf build-frontend build-go \
         frontend-dev clean help test deps lint-frontend
@@ -60,7 +65,7 @@ $(STAMP_DIR)/npm: $(FRONTEND_DIR)/package.json $(FRONTEND_DIR)/package-lock.json
 $(STAMP_DIR)/frontend: $(STAMP_DIR)/npm $(FE_SOURCES)
 	@mkdir -p $(STAMP_DIR)
 	@echo ">>> 静态导出 Next.js 前端..."
-	cd $(FRONTEND_DIR) && NEXT_EXPORT=1 $(NPM) run build
+	cd $(FRONTEND_DIR) && NEXT_EXPORT=1 NEXT_TELEMETRY_DISABLED=1 $(NPM) run build $(FRONTEND_NEXT_EXTRA)
 	@echo "✓ 前端静态导出完成: $(FRONTEND_DIR)/out/"
 	@touch $@
 
@@ -94,6 +99,14 @@ test:
 	$(GO) test -v ./...
 	@echo "✓ 测试完成"
 
+# ─── 安全告警 E2E（默认针对 -c bash；Claude Code 见 scripts/security-alerts-claude-code.md）
+trigger-security-alerts:
+	@echo "提示: 先运行  sudo ./agentsight record -c bash --duckdb-path ./agentsight.duckdb --server"
+	@echo "若监控 claude: 勿在独立终端跑本脚本，按 scripts/security-alerts-claude-code.md 在 Claude 内触发"
+	@echo "然后执行:"
+	@chmod +x scripts/trigger-security-alerts.sh
+	./scripts/trigger-security-alerts.sh
+
 # ─── Clean ────────────────────────────────────────────────────────────
 clean:
 	@echo ">>> 清理构建产物..."
@@ -124,7 +137,7 @@ help:
 	@echo ""
 	@echo "单独构建:"
 	@echo "  build-bpf      - 生成 BPF Go 绑定（需要 clang）"
-	@echo "  build-frontend - 编译并静态导出前端"
+	@echo "  build-frontend - 静态导出前端（默认 Turbopack；FRONTEND_WEBPACK=1 用 webpack）"
 	@echo "  build-go       - 编译 Go 程序"
 	@echo ""
 	@echo "开发:"

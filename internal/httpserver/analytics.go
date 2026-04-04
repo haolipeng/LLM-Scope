@@ -184,6 +184,29 @@ func handleHotFiles(db *sql.DB) gin.HandlerFunc {
 
 func handleSecurityAlerts(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 单条告警：GET .../security/alerts?id=123
+		if idStr := strings.TrimSpace(c.Query("id")); idStr != "" {
+			idVal, err := strconv.ParseUint(idStr, 10, 64)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+				return
+			}
+			rows, err := db.Query("SELECT * FROM v_security_alerts WHERE id = ?", idVal)
+			if err != nil {
+				respondInternalServerError(c, err)
+				return
+			}
+			defer rows.Close()
+
+			result := rowsToMaps(rows)
+			if len(result) == 0 {
+				c.JSON(http.StatusNotFound, gin.H{"error": "alert not found"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"data": result[0], "count": 1})
+			return
+		}
+
 		query := "SELECT * FROM v_security_alerts"
 		var args []any
 		if sid := c.Query("session_id"); sid != "" {

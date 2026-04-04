@@ -46,23 +46,28 @@ func SetupRouter(webAssets fs.FS, analyticsDB *sql.DB) *gin.Engine {
 				return
 			}
 
-			file, err := webAssets.Open(reqPath)
-			if err != nil {
-				c.Request.URL.Path = "/"
+			// Next.js static export (trailingSlash): routes live at e.g. security/alerts/index.html
+			tryPaths := []string{reqPath, path.Join(reqPath, "index.html")}
+			for _, p := range tryPaths {
+				file, err := webAssets.Open(p)
+				if err != nil {
+					continue
+				}
+				stat, statErr := file.Stat()
+				_ = file.Close()
+				if statErr != nil {
+					continue
+				}
+				if stat.IsDir() {
+					continue
+				}
+				c.Request.URL.Path = "/" + p
 				fileServer.ServeHTTP(c.Writer, c.Request)
 				return
 			}
 
-			stat, statErr := file.Stat()
-			_ = file.Close()
-
-			if statErr == nil && stat.IsDir() {
-				c.Request.URL.Path = "/"
-				fileServer.ServeHTTP(c.Writer, c.Request)
-				return
-			}
-
-			c.Request.URL.Path = "/" + reqPath
+			// SPA fallback: unknown path → root shell (client router may still 404 visually)
+			c.Request.URL.Path = "/"
 			fileServer.ServeHTTP(c.Writer, c.Request)
 		})
 	}

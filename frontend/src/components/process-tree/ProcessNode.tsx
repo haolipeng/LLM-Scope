@@ -63,7 +63,7 @@ function FileGroup({ events, expandedEvents, onToggleEvent }: FileGroupProps) {
         )}
         <DocumentIcon className="h-4 w-4 text-cyan-600 mr-2 flex-shrink-0" />
         <span className="text-sm font-medium text-cyan-800">
-          {events.length} {t('badge.file_other', { count: events.length })}
+          {t(events.length === 1 ? 'badge.file_one' : 'badge.file_other', { count: events.length })}
         </span>
         <span className="ml-2 text-xs text-cyan-500 truncate">
           {events.slice(0, 3).map(e => {

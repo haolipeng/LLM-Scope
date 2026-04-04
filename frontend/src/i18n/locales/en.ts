@@ -23,6 +23,8 @@ export const en = {
   'app.noEventsLoaded': 'No events loaded',
   'app.syncFromServer': 'Sync Data from Server',
   'app.uploadLogFile': 'Upload Log File',
+  'app.securityAlerts': 'Security alerts',
+  'app.sessionFilter': 'Session: {id}',
 
   // Upload (UploadPanel.tsx)
   'upload.title': 'Upload Log File',
@@ -151,4 +153,35 @@ export const en = {
   // Log (LogList.tsx, LogView.tsx)
   'log.noEvents': 'No events found matching the current filters.',
   'log.eventDetails': 'Log Event Details',
+
+  // Security alerts (/security/alerts)
+  'security.title': 'Security alerts',
+  'security.subtitle': 'Rule-based findings from the security analyzer (DuckDB v_security_alerts).',
+  'security.backHome': 'Home',
+  'security.backList': 'Back to list',
+  'security.loading': 'Loading…',
+  'security.empty': 'No security alerts in the database.',
+  'security.emptyHint':
+    'Alerts are created only when the pipeline\'s security rules fire (e.g. sensitive file access, risky commands) and are written to DuckDB. If you only opened the Web UI without running a capture, or the monitored workload never matched a rule, the list stays empty.\n\nUse agentsight record or trace with DuckDB enabled (default --duckdb-path agentsight.duckdb) and reproduce an action that triggers a rule.',
+  'security.alertNotFound': 'Alert not found.',
+  'security.colId': 'ID',
+  'security.colTime': 'Time',
+  'security.colType': 'Type',
+  'security.colRisk': 'Risk',
+  'security.colSession': 'Session',
+  'security.colDesc': 'Description',
+  'security.session': 'Session',
+  'security.eventTime': 'Event time',
+  'security.process': 'Process',
+  'security.sourceTable': 'Source table',
+  'security.sourceEventId': 'Source event id',
+  'security.evidence': 'Evidence',
+  'security.evSource': 'Source table',
+  'security.evType': 'Event type',
+  'security.evComm': 'Comm',
+  'security.evTs': 'timestamp_ns',
+  'security.evDetail': 'Detail',
+  'security.noEvidence': 'No structured evidence rows.',
+  'security.rawPayload': 'Raw payload (data_json)',
+  'security.openTimeline': 'Open in timeline',
 } as const;
