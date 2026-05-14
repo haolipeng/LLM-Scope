@@ -280,6 +280,16 @@ package myprogram
 
 6. **Register the CLI command**: Add a new command file in `cmd/agentsight/` or integrate into existing `trace` command
 
+## Decrypted HTTP as PCAP (optional)
+
+`trace`, `record`, and `ssl` support `--http-pcap /path/to/out.pcap`.
+
+- The writer is inserted **after** `HTTPParser` and **before** `HTTPFilter`, so HTTP events dropped by HTTP filters are **still** recorded in the pcap.
+- Frames are **synthetic**: Ethernet + IPv4 + TCP using `10.0.0.1` ↔ `10.0.0.2:443`, multiplexed **per process PID** (not per thread). Requests and responses often arrive on different threads; using one synthetic flow per PID keeps **Follow TCP Stream** showing both directions.
+- TCP payload uses `raw_data` when the parser includes it (`--http-raw-data` / `Raw: true`); otherwise it is rebuilt from `first_line`, `headers`, and `body`. JSON bodies are **pretty-printed** when `Content-Type` suggests JSON or the body parses as JSON, and `Content-Length` is adjusted.
+- For `ssl`, use `--http-parser` together with `--http-pcap`.
+- The pcap **snaplen** is 64MiB per frame; any single synthetic packet larger than that will produce a file Wireshark rejects as corrupt.
+
 ## Faster `build-frontend`
 
 - **Incremental**: `make build-frontend` only re-runs when `frontend/src/` (and related config) changes; if you did not touch the frontend, Make skips work.

@@ -59,6 +59,16 @@ make frontend-dev
 - 路径支持相对路径（如 `./frontend/out`）和绝对路径。
 - 生产环境中不要设置此变量，将正常使用内嵌资源。
 
+## 解密 HTTP 导出为 PCAP（可选）
+
+`trace`、`record`、`ssl` 支持 `--http-pcap /path/to/out.pcap`。
+
+- 插入在 **HTTPParser 之后、HTTPFilter 之前**，被 HTTP 过滤掉的事件仍会写入 pcap。
+- 帧为 **合成**：以太网 + IPv4 + TCP，`10.0.0.1` ↔ `10.0.0.2:443`，按 **进程 PID** 合成一条连接（不按线程 tid 分多条），避免请求与响应因线程不同而落在两条流里导致「只看到响应」。伪客户端端口由 PID 推导。
+- 负载优先使用解析结果中的 `raw_data`（需 `--http-raw-data` 或配置 `Raw`）；否则由 `first_line`、`headers`、`body` 拼回。对 **JSON** 正文会缩进排版并同步修正 **Content-Length**，便于在 Wireshark 里阅读。
+- `ssl` 子命令需同时指定 `--http-parser` 与 `--http-pcap`。
+- pcap 头中 **snaplen** 为 64MiB：单帧（整段 HTTP）不得超过该值，否则 Wireshark 会报文件损坏；超大响应需另行处理。
+
 ## 前端静态导出如何更快
 
 - **增量**：`make build-frontend` 依赖 `frontend/src/` 等源文件的修改时间；**未改前端时** Make 会跳过导出，几乎不耗时。

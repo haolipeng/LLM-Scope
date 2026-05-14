@@ -1,15 +1,22 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
-/* Copyright (c) 2020 Facebook */
+// Unified eBPF program for AgentSight: Process + SSL + Stdio collectors
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
-#include "process.h"
+#include <bpf/bpf_endian.h>
+#include "agentsight.h"
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
-/* Force BTF emission for struct event so bpf2go can generate Go types */
+/* Force BTF emission for all event structs so bpf2go can generate Go types */
 struct event *unused_event __attribute__((unused));
+struct probe_SSL_data_t *unused_ssl_data __attribute__((unused));
+struct stdiocap_event_t *unused_stdiocap_event __attribute__((unused));
+
+// ════════════════════════════════════════════════════════════════════════════════
+// Process 采集器
+// ════════════════════════════════════════════════════════════════════════════════
 
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
@@ -21,7 +28,7 @@ struct {
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
 	__uint(max_entries, 256 * 1024);
-} rb SEC(".maps");
+} rb_process SEC(".maps");
 
 const volatile unsigned long long min_duration_ns = 0;
 
@@ -44,7 +51,7 @@ int BPF_URETPROBE(bash_readline, const void *ret)
 	pid = bpf_get_current_pid_tgid() >> 32;
 
 	/* Reserve sample from BPF ringbuf */
-	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+	e = bpf_ringbuf_reserve(&rb_process, sizeof(*e), 0);
 	if (!e)
 		return 0;
 
@@ -86,7 +93,7 @@ int handle_exec(struct trace_event_raw_sched_process_exec *ctx)
 		return 0;
 
 	/* reserve sample from BPF ringbuf */
-	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+	e = bpf_ringbuf_reserve(&rb_process, sizeof(*e), 0);
 	if (!e)
 		return 0;
 
@@ -171,7 +178,7 @@ int handle_exit(struct trace_event_raw_sched_process_template* ctx)
 		return 0;
 
 	/* reserve sample from BPF ringbuf */
-	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+	e = bpf_ringbuf_reserve(&rb_process, sizeof(*e), 0);
 	if (!e)
 		return 0;
 
@@ -205,7 +212,6 @@ int trace_openat(struct trace_event_raw_sys_enter *ctx)
 	pid = bpf_get_current_pid_tgid() >> 32;
 
 	/* Get syscall arguments */
-	//dfd = (int)ctx->args[0];
 	filename = (const char *)ctx->args[1];
 	flags = (int)ctx->args[2];
 
@@ -214,14 +220,14 @@ int trace_openat(struct trace_event_raw_sys_enter *ctx)
 		return 0;
 
 	/* Reserve sample from BPF ringbuf */
-	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+	e = bpf_ringbuf_reserve(&rb_process, sizeof(*e), 0);
 	if (!e)
 		return 0;
 
 	/* Fill out the event */
 	e->type = EVENT_TYPE_FILE_OPERATION;
 	e->pid = pid;
-	e->ppid = 0; /* Will be filled if needed */
+	e->ppid = 0;
 	e->exit_code = 0;
 	e->duration_ns = 0;
 	e->timestamp_ns = bpf_ktime_get_ns();
@@ -230,7 +236,7 @@ int trace_openat(struct trace_event_raw_sys_enter *ctx)
 
 	/* Copy filepath and set file open details */
 	bpf_probe_read_kernel_str(e->file_op.filepath, sizeof(e->file_op.filepath), filepath);
-	e->file_op.fd = -1; /* Will be set on return if needed */
+	e->file_op.fd = -1;
 	e->file_op.flags = flags;
 	e->file_op.op_type = FILE_OP_OPEN;
 
@@ -260,7 +266,7 @@ int trace_open(struct trace_event_raw_sys_enter *ctx)
 		return 0;
 
 	/* Reserve sample from BPF ringbuf */
-	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+	e = bpf_ringbuf_reserve(&rb_process, sizeof(*e), 0);
 	if (!e)
 		return 0;
 
@@ -304,7 +310,7 @@ int trace_unlink(struct trace_event_raw_sys_enter *ctx)
 		return 0;
 
 	/* Reserve sample from BPF ringbuf */
-	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+	e = bpf_ringbuf_reserve(&rb_process, sizeof(*e), 0);
 	if (!e)
 		return 0;
 
@@ -351,7 +357,7 @@ int trace_unlinkat(struct trace_event_raw_sys_enter *ctx)
 		return 0;
 
 	/* Reserve sample from BPF ringbuf */
-	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+	e = bpf_ringbuf_reserve(&rb_process, sizeof(*e), 0);
 	if (!e)
 		return 0;
 
@@ -368,7 +374,7 @@ int trace_unlinkat(struct trace_event_raw_sys_enter *ctx)
 	/* Copy filepath and set file delete details */
 	bpf_probe_read_kernel_str(e->file_op.filepath, sizeof(e->file_op.filepath), filepath);
 	e->file_op.fd = dfd;
-	e->file_op.flags = flags;  /* AT_REMOVEDIR (0x200) means remove directory */
+	e->file_op.flags = flags;
 	e->file_op.op_type = FILE_OP_DELETE;
 
 	/* Submit to user-space */
@@ -427,16 +433,6 @@ static __always_inline u64 caps_to_u64(const struct cred *cred, int cap_type)
 
 /*
  * kprobe/commit_creds - Monitor credential changes
- *
- * commit_creds() is the "chokepoint" for all privilege changes:
- * - setuid/setgid system calls
- * - execve of SUID/SGID binaries
- * - kernel exploits that modify credentials
- *
- * By hooking here, we capture ALL privilege escalation attempts
- * with a single probe point.
- *
- * Reference: tracee's trace_commit_creds implementation
  */
 SEC("kprobe/commit_creds")
 int BPF_KPROBE(trace_commit_creds, struct cred *new_cred)
@@ -499,7 +495,7 @@ int BPF_KPROBE(trace_commit_creds, struct cred *new_cred)
 		return 0;
 
 	/* Reserve sample from BPF ringbuf */
-	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+	e = bpf_ringbuf_reserve(&rb_process, sizeof(*e), 0);
 	if (!e)
 		return 0;
 
@@ -550,7 +546,6 @@ int BPF_KPROBE(trace_commit_creds, struct cred *new_cred)
 
 /*
  * Syscall tracepoint for connect - Monitor network connections
- * Captures destination IP:Port for TCP/UDP connections
  */
 SEC("tp/syscalls/sys_enter_connect")
 int trace_connect(struct trace_event_raw_sys_enter *ctx)
@@ -578,7 +573,7 @@ int trace_connect(struct trace_event_raw_sys_enter *ctx)
 		return 0;
 
 	/* Reserve sample from BPF ringbuf */
-	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+	e = bpf_ringbuf_reserve(&rb_process, sizeof(*e), 0);
 	if (!e)
 		return 0;
 
@@ -633,7 +628,7 @@ int trace_rename(struct trace_event_raw_sys_enter *ctx)
 	newpath = (const char *)ctx->args[1];
 
 	/* Reserve sample from BPF ringbuf */
-	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+	e = bpf_ringbuf_reserve(&rb_process, sizeof(*e), 0);
 	if (!e)
 		return 0;
 
@@ -657,7 +652,7 @@ int trace_rename(struct trace_event_raw_sys_enter *ctx)
 }
 
 /*
- * Syscall tracepoint for renameat - Monitor file renames (modern API)
+ * Syscall tracepoint for renameat
  */
 SEC("tp/syscalls/sys_enter_renameat")
 int trace_renameat(struct trace_event_raw_sys_enter *ctx)
@@ -674,7 +669,7 @@ int trace_renameat(struct trace_event_raw_sys_enter *ctx)
 	newpath = (const char *)ctx->args[3];
 
 	/* Reserve sample from BPF ringbuf */
-	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+	e = bpf_ringbuf_reserve(&rb_process, sizeof(*e), 0);
 	if (!e)
 		return 0;
 
@@ -698,7 +693,7 @@ int trace_renameat(struct trace_event_raw_sys_enter *ctx)
 }
 
 /*
- * Syscall tracepoint for renameat2 - Monitor file renames (newest API with flags)
+ * Syscall tracepoint for renameat2
  */
 SEC("tp/syscalls/sys_enter_renameat2")
 int trace_renameat2(struct trace_event_raw_sys_enter *ctx)
@@ -715,7 +710,7 @@ int trace_renameat2(struct trace_event_raw_sys_enter *ctx)
 	newpath = (const char *)ctx->args[3];
 
 	/* Reserve sample from BPF ringbuf */
-	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+	e = bpf_ringbuf_reserve(&rb_process, sizeof(*e), 0);
 	if (!e)
 		return 0;
 
@@ -756,7 +751,7 @@ int trace_mkdir(struct trace_event_raw_sys_enter *ctx)
 	mode = (int)ctx->args[1];
 
 	/* Reserve sample from BPF ringbuf */
-	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+	e = bpf_ringbuf_reserve(&rb_process, sizeof(*e), 0);
 	if (!e)
 		return 0;
 
@@ -780,7 +775,7 @@ int trace_mkdir(struct trace_event_raw_sys_enter *ctx)
 }
 
 /*
- * Syscall tracepoint for mkdirat - Monitor directory creation (modern API)
+ * Syscall tracepoint for mkdirat
  */
 SEC("tp/syscalls/sys_enter_mkdirat")
 int trace_mkdirat(struct trace_event_raw_sys_enter *ctx)
@@ -797,7 +792,7 @@ int trace_mkdirat(struct trace_event_raw_sys_enter *ctx)
 	mode = (int)ctx->args[2];
 
 	/* Reserve sample from BPF ringbuf */
-	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+	e = bpf_ringbuf_reserve(&rb_process, sizeof(*e), 0);
 	if (!e)
 		return 0;
 
@@ -820,4 +815,491 @@ int trace_mkdirat(struct trace_event_raw_sys_enter *ctx)
 	return 0;
 }
 
+// ════════════════════════════════════════════════════════════════════════════════
+// SSL 采集器
+// ════════════════════════════════════════════════════════════════════════════════
 
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, SSL_RINGBUF_SIZE);
+} rb_ssl SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 10240);
+    __type(key, __u32);
+    __type(value, size_t*);
+} readbytes_ptrs SEC(".maps");
+
+#define SSL_MAX_ENTRIES 10240
+
+#define min(x, y)                      \
+    ({                                 \
+        typeof(x) _min1 = (x);         \
+        typeof(y) _min2 = (y);         \
+        (void)(&_min1 == &_min2);      \
+        _min1 < _min2 ? _min1 : _min2; \
+    })
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, SSL_MAX_ENTRIES);
+    __type(key, __u32);
+    __type(value, __u64);
+} start_ns SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, SSL_MAX_ENTRIES);
+    __type(key, __u32);
+    __type(value, __u64);
+} bufs SEC(".maps");
+
+const volatile pid_t ssl_targ_pid = 0;
+const volatile uid_t ssl_targ_uid = -1;
+
+static __always_inline bool ssl_trace_allowed(u32 uid, u32 pid)
+{
+    /* filters */
+    if (ssl_targ_pid && ssl_targ_pid != pid)
+        return false;
+    if (ssl_targ_uid != -1) {
+        if (ssl_targ_uid != uid) {
+            return false;
+        }
+    }
+    return true;
+}
+
+SEC("uprobe/do_handshake")
+int BPF_UPROBE(probe_SSL_rw_enter, void *ssl, void *buf, int num) {
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 pid = pid_tgid >> 32;
+    u32 tid = pid_tgid;
+    u32 uid = bpf_get_current_uid_gid();
+    u64 ts = bpf_ktime_get_ns();
+
+    if (!ssl_trace_allowed(uid, pid)) {
+        return 0;
+    }
+
+    /* store arg info for later lookup */
+    bpf_map_update_elem(&bufs, &tid, &buf, BPF_ANY);
+    bpf_map_update_elem(&start_ns, &tid, &ts, BPF_ANY);
+    return 0;
+}
+
+static int SSL_exit(struct pt_regs *ctx, int rw) {
+    int ret = 0;
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 pid = pid_tgid >> 32;
+    u32 tid = (u32)pid_tgid;
+    u32 uid = bpf_get_current_uid_gid();
+    u64 ts = bpf_ktime_get_ns();
+
+    if (!ssl_trace_allowed(uid, pid)) {
+        return 0;
+    }
+
+    /* store arg info for later lookup */
+    u64 *bufp = bpf_map_lookup_elem(&bufs, &tid);
+    if (bufp == 0)
+        return 0;
+
+    u64 *tsp = bpf_map_lookup_elem(&start_ns, &tid);
+    if (!tsp)
+        return 0;
+    u64 delta_ns = ts - *tsp;
+
+    int len = PT_REGS_RC(ctx);
+    if (len <= 0)  // no data
+        return 0;
+
+    /* reserve space in ring buffer */
+    struct probe_SSL_data_t *data = bpf_ringbuf_reserve(&rb_ssl, sizeof(*data), 0);
+    if (!data)
+        return 0;
+
+    data->timestamp_ns = ts;
+    data->delta_ns = delta_ns;
+    data->pid = pid;
+    data->tid = tid;
+    data->uid = uid;
+    data->len = (u32)len;
+    data->buf_filled = 0;
+    data->buf_size = 0;
+    data->rw = rw;
+    data->is_handshake = false;
+    u32 buf_copy_size = min((size_t)SSL_MAX_BUF_SIZE, (size_t)len);
+
+    bpf_get_current_comm(&data->comm, sizeof(data->comm));
+
+    if (bufp != 0)
+        ret = bpf_probe_read_user(&data->buf, buf_copy_size, (char *)*bufp);
+
+    bpf_map_delete_elem(&bufs, &tid);
+    bpf_map_delete_elem(&start_ns, &tid);
+
+    if (!ret) {
+        data->buf_filled = 1;
+        data->buf_size = buf_copy_size;
+    } else {
+        data->buf_filled = 0;
+        data->buf_size = 0;
+    }
+
+    /* submit to ring buffer */
+    bpf_ringbuf_submit(data, 0);
+    return 0;
+}
+
+SEC("uretprobe/SSL_read")
+int BPF_URETPROBE(probe_SSL_read_exit) {
+    return (SSL_exit(ctx, 0));
+}
+
+SEC("uretprobe/SSL_write")
+int BPF_URETPROBE(probe_SSL_write_exit) {
+    return (SSL_exit(ctx, 1));
+}
+
+SEC("uprobe/SSL_write_ex")
+int BPF_UPROBE(probe_SSL_write_ex_enter, void *ssl, void *buf, size_t num, size_t *readbytes) {
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 pid = pid_tgid >> 32;
+    u32 tid = (u32)pid_tgid;
+    u32 uid = bpf_get_current_uid_gid();
+    u64 ts = bpf_ktime_get_ns();
+
+    if (!ssl_trace_allowed(uid, pid)) {
+        return 0;
+    }
+
+    bpf_map_update_elem(&bufs, &tid, &buf, BPF_ANY);
+    bpf_map_update_elem(&start_ns, &tid, &ts, BPF_ANY);
+
+    bpf_map_update_elem(&readbytes_ptrs, &tid, &readbytes, BPF_ANY);
+
+    return 0;
+}
+
+SEC("uprobe/SSL_read_ex")
+int BPF_UPROBE(probe_SSL_read_ex_enter, void *ssl, void *buf, size_t num, size_t *readbytes) {
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 pid = pid_tgid >> 32;
+    u32 tid = (u32)pid_tgid;
+    u32 uid = bpf_get_current_uid_gid();
+    u64 ts = bpf_ktime_get_ns();
+
+    if (!ssl_trace_allowed(uid, pid)) {
+        return 0;
+    }
+
+    bpf_map_update_elem(&bufs, &tid, &buf, BPF_ANY);
+    bpf_map_update_elem(&start_ns, &tid, &ts, BPF_ANY);
+
+    bpf_map_update_elem(&readbytes_ptrs, &tid, &readbytes, BPF_ANY);
+
+    return 0;
+}
+
+static int ex_SSL_exit(struct pt_regs *ctx, int rw, int len) {
+    int ret = 0;
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 pid = pid_tgid >> 32;
+    u32 tid = (u32)pid_tgid;
+    u32 uid = bpf_get_current_uid_gid();
+    u64 ts = bpf_ktime_get_ns();
+
+    if (!ssl_trace_allowed(uid, pid)) {
+        return 0;
+    }
+
+    /* store arg info for later lookup */
+    u64 *bufp = bpf_map_lookup_elem(&bufs, &tid);
+    if (bufp == 0)
+        return 0;
+
+    u64 *tsp = bpf_map_lookup_elem(&start_ns, &tid);
+    if (!tsp)
+        return 0;
+    u64 delta_ns = ts - *tsp;
+
+    if (len <= 0)  // no data
+        return 0;
+
+    /* reserve space in ring buffer */
+    struct probe_SSL_data_t *data = bpf_ringbuf_reserve(&rb_ssl, sizeof(*data), 0);
+    if (!data)
+        return 0;
+
+    data->timestamp_ns = ts;
+    data->delta_ns = delta_ns;
+    data->pid = pid;
+    data->tid = tid;
+    data->uid = uid;
+    data->len = (u32)len;
+    data->buf_filled = 0;
+    data->buf_size = 0;
+    data->rw = rw;
+    data->is_handshake = false;
+
+    /* Explicit bounds clamping to satisfy eBPF verifier
+     * Use bitmask first to ensure value range, then clamp to actual max */
+    u32 buf_copy_size = (u32)len & 0xFFFFF;  /* Mask to 20 bits (1MB-1) */
+    if (buf_copy_size > SSL_MAX_BUF_SIZE)
+        buf_copy_size = SSL_MAX_BUF_SIZE;
+
+    bpf_get_current_comm(&data->comm, sizeof(data->comm));
+
+    if (bufp != 0)
+        ret = bpf_probe_read_user(&data->buf, buf_copy_size, (char *)*bufp);
+
+    bpf_map_delete_elem(&bufs, &tid);
+    bpf_map_delete_elem(&start_ns, &tid);
+
+    if (!ret) {
+        data->buf_filled = 1;
+        data->buf_size = buf_copy_size;
+    } else {
+        data->buf_filled = 0;
+        data->buf_size = 0;
+    }
+
+    /* submit to ring buffer */
+    bpf_ringbuf_submit(data, 0);
+
+    return 0;
+}
+
+SEC("uretprobe/SSL_write_ex")
+int BPF_URETPROBE(probe_SSL_write_ex_exit)
+{
+    u32 tid = (u32)bpf_get_current_pid_tgid();
+    size_t **readbytes_ptr = bpf_map_lookup_elem(&readbytes_ptrs, &tid);
+    if (!readbytes_ptr)
+        return 0;
+
+    size_t written = 0;
+    bpf_probe_read_user(&written, sizeof(written), *readbytes_ptr);
+    bpf_map_delete_elem(&readbytes_ptrs, &tid);
+
+    int ret = PT_REGS_RC(ctx);
+    int len = (ret == 1) ? written : 0;
+
+    return ex_SSL_exit(ctx, 1, len);
+}
+
+SEC("uretprobe/SSL_read_ex")
+int BPF_URETPROBE(probe_SSL_read_ex_exit)
+{
+    u32 tid = (u32)bpf_get_current_pid_tgid();
+    size_t **readbytes_ptr = bpf_map_lookup_elem(&readbytes_ptrs, &tid);
+    if (!readbytes_ptr)
+        return 0;
+
+    size_t written = 0;
+    bpf_probe_read_user(&written, sizeof(written), *readbytes_ptr);
+    bpf_map_delete_elem(&readbytes_ptrs, &tid);
+
+    int ret = PT_REGS_RC(ctx);
+    int len = (ret == 1) ? written : 0;
+
+    return ex_SSL_exit(ctx, 0, len);
+}
+
+SEC("uprobe/do_handshake")
+int BPF_UPROBE(probe_SSL_do_handshake_enter, void *ssl) {
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 pid = pid_tgid >> 32;
+    u32 tid = (u32)pid_tgid;
+    u64 ts = bpf_ktime_get_ns();
+    u32 uid = bpf_get_current_uid_gid();
+
+    if (!ssl_trace_allowed(uid, pid)) {
+        return 0;
+    }
+
+    /* store arg info for later lookup */
+    bpf_map_update_elem(&start_ns, &tid, &ts, BPF_ANY);
+    return 0;
+}
+
+SEC("uretprobe/do_handshake")
+int BPF_URETPROBE(probe_SSL_do_handshake_exit) {
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 pid = pid_tgid >> 32;
+    u32 tid = (u32)pid_tgid;
+    u32 uid = bpf_get_current_uid_gid();
+    u64 ts = bpf_ktime_get_ns();
+    int ret = 0;
+
+    /* use kernel terminology here for tgid/pid: */
+    u32 tgid = pid_tgid >> 32;
+
+    /* store arg info for later lookup */
+    if (!ssl_trace_allowed(tgid, pid)) {
+        return 0;
+    }
+
+    u64 *tsp = bpf_map_lookup_elem(&start_ns, &tid);
+    if (tsp == 0)
+        return 0;
+
+    ret = PT_REGS_RC(ctx);
+    if (ret <= 0)  // handshake failed
+        return 0;
+
+    /* reserve space in ring buffer */
+    struct probe_SSL_data_t *data = bpf_ringbuf_reserve(&rb_ssl, sizeof(*data), 0);
+    if (!data)
+        return 0;
+
+    data->timestamp_ns = ts;
+    data->delta_ns = ts - *tsp;
+    data->pid = pid;
+    data->tid = tid;
+    data->uid = uid;
+    data->len = ret;
+    data->buf_filled = 0;
+    data->buf_size = 0;
+    data->rw = 2;
+    data->is_handshake = true;
+    bpf_get_current_comm(&data->comm, sizeof(data->comm));
+    bpf_map_delete_elem(&start_ns, &tid);
+
+    /* submit to ring buffer */
+    bpf_ringbuf_submit(data, 0);
+    return 0;
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// Stdio 采集器
+// ════════════════════════════════════════════════════════════════════════════════
+
+struct io_args_t {
+	__u64 buf;
+	__u64 start_ns;
+	__s32 fd;
+	__u8 is_read;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_RINGBUF);
+	__uint(max_entries, STDIO_RINGBUF_SIZE);
+} rb_stdio SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 8192);
+	__type(key, __u64);
+	__type(value, struct io_args_t);
+} io_args SEC(".maps");
+
+const volatile __u32 stdio_targ_pid = 0;
+const volatile __u32 stdio_targ_uid = 0xffffffffU;
+const volatile bool trace_stdio_only = true;
+const volatile __u32 max_capture_bytes = STDIO_MAX_BUF_SIZE;
+
+static __always_inline bool stdio_trace_allowed(__u32 uid, __u32 pid, int fd)
+{
+	if (stdio_targ_pid && stdio_targ_pid != pid)
+		return false;
+	if (stdio_targ_uid != 0xffffffffU && stdio_targ_uid != uid)
+		return false;
+	if (trace_stdio_only && (fd < 0 || fd > 2))
+		return false;
+	return true;
+}
+
+static __always_inline int stdio_enter_common(int fd, const void *buf, bool is_read)
+{
+	__u64 pid_tgid = bpf_get_current_pid_tgid();
+	__u32 pid = pid_tgid >> 32;
+	__u32 uid = bpf_get_current_uid_gid();
+	struct io_args_t args = {};
+
+	if (!stdio_trace_allowed(uid, pid, fd))
+		return 0;
+
+	args.buf = (__u64)buf;
+	args.start_ns = bpf_ktime_get_ns();
+	args.fd = fd;
+	args.is_read = is_read;
+	bpf_map_update_elem(&io_args, &pid_tgid, &args, BPF_ANY);
+	return 0;
+}
+
+static __always_inline int stdio_exit_common(long ret)
+{
+	__u64 pid_tgid = bpf_get_current_pid_tgid();
+	__u32 pid = pid_tgid >> 32;
+	__u32 tid = (__u32)pid_tgid;
+	__u32 uid = bpf_get_current_uid_gid();
+	struct io_args_t *args;
+	struct stdiocap_event_t *event;
+	__u32 copy_size;
+
+	args = bpf_map_lookup_elem(&io_args, &pid_tgid);
+	if (!args)
+		return 0;
+
+	if (ret <= 0) {
+		bpf_map_delete_elem(&io_args, &pid_tgid);
+		return 0;
+	}
+
+	event = bpf_ringbuf_reserve(&rb_stdio, sizeof(*event), 0);
+	if (!event) {
+		bpf_map_delete_elem(&io_args, &pid_tgid);
+		return 0;
+	}
+
+	event->timestamp_ns = bpf_ktime_get_ns();
+	event->delta_ns = event->timestamp_ns - args->start_ns;
+	event->pid = pid;
+	event->tid = tid;
+	event->uid = uid;
+	event->fd = args->fd;
+	event->len = ret > 0xffffffffL ? 0xffffffffU : (__u32)ret;
+	event->is_read = args->is_read;
+	bpf_get_current_comm(&event->comm, sizeof(event->comm));
+
+	copy_size = event->len;
+	if (copy_size > max_capture_bytes)
+		copy_size = max_capture_bytes;
+	if (copy_size > STDIO_MAX_BUF_SIZE)
+		copy_size = STDIO_MAX_BUF_SIZE;
+	event->buf_size = copy_size;
+
+	if (copy_size > 0)
+		bpf_probe_read_user(event->buf, copy_size, (const void *)args->buf);
+
+	bpf_ringbuf_submit(event, 0);
+	bpf_map_delete_elem(&io_args, &pid_tgid);
+	return 0;
+}
+
+SEC("tp/syscalls/sys_enter_read")
+int trace_enter_read(struct trace_event_raw_sys_enter *ctx)
+{
+	return stdio_enter_common((int)ctx->args[0], (const void *)ctx->args[1], true);
+}
+
+SEC("tp/syscalls/sys_exit_read")
+int trace_exit_read(struct trace_event_raw_sys_exit *ctx)
+{
+	return stdio_exit_common(ctx->ret);
+}
+
+SEC("tp/syscalls/sys_enter_write")
+int trace_enter_write(struct trace_event_raw_sys_enter *ctx)
+{
+	return stdio_enter_common((int)ctx->args[0], (const void *)ctx->args[1], false);
+}
+
+SEC("tp/syscalls/sys_exit_write")
+int trace_exit_write(struct trace_event_raw_sys_exit *ctx)
+{
+	return stdio_exit_common(ctx->ret);
+}

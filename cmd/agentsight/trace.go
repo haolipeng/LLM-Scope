@@ -49,6 +49,8 @@ type TraceSSLConfig struct {
 	HTTPFilter  []string
 	DisableAuth bool
 	BinaryPath  string
+	// HTTPPCapPath 非空时，在 HTTP 解析后、HTTP 过滤前将明文 HTTP 写入合成 TCP 的 pcap（Wireshark 可读）
+	HTTPPCapPath string
 }
 
 // TraceProcessConfig 进程监控专用配置
@@ -106,6 +108,7 @@ var (
 	traceStdioAllFDs    bool
 	traceStdioMaxBytes  int
 	traceDuckDBPath     string
+	traceHTTPPCap string
 )
 
 var traceCmd = &cobra.Command{
@@ -138,6 +141,7 @@ func init() {
 	traceCmd.Flags().BoolVar(&traceStdioAllFDs, "stdio-all-fds", false, "捕获所有 FD")
 	traceCmd.Flags().IntVar(&traceStdioMaxBytes, "stdio-max-bytes", 8192, "stdio 每事件最大字节数")
 	traceCmd.Flags().StringVar(&traceDuckDBPath, "duckdb-path", "", "DuckDB 数据库文件路径（空则不启用）")
+	traceCmd.Flags().StringVar(&traceHTTPPCap, "http-pcap", "", "将 SSE 合并后解析的 HTTP 写入合成 TCP 的 pcap 文件路径（空则关闭）")
 }
 
 // runTrace 从命令行标志构建 TraceConfig 并启动综合监控
@@ -146,14 +150,15 @@ func runTrace(cmd *cobra.Command, _ []string) {
 		Comm: traceComm,
 		PID:  tracePID,
 		SSL: TraceSSLConfig{
-			Enabled:     traceSSL,
-			UID:         traceSSLUID,
-			Filter:      traceSSLFilter,
-			Handshake:   traceSSLHandshake,
-			Raw:         traceSSLRaw,
-			HTTPFilter:  traceHTTPFilter,
-			DisableAuth: traceDisableAuth,
-			BinaryPath:  traceBinaryPath,
+			Enabled:      traceSSL,
+			UID:          traceSSLUID,
+			Filter:       traceSSLFilter,
+			Handshake:    traceSSLHandshake,
+			Raw:          traceSSLRaw,
+			HTTPFilter:   traceHTTPFilter,
+			DisableAuth:  traceDisableAuth,
+			BinaryPath:   traceBinaryPath,
+			HTTPPCapPath: traceHTTPPCap,
 		},
 		Process: TraceProcessConfig{
 			Enabled:  traceProcess,
@@ -184,17 +189,130 @@ func runTrace(cmd *cobra.Command, _ []string) {
 	executeTrace(cmd, cfg)
 }
 
-// executeTrace 根据配置启动各 runner 和 analyzer 管道
-func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
+// validateTraceConfig 检查配置的前置约束
+func validateTraceConfig(cmd *cobra.Command, cfg TraceConfig) {
 	if !cfg.SSL.Enabled && !cfg.Process.Enabled && !cfg.System.Enabled && !cfg.Stdio.Enabled {
 		cliErrln(cmd, "至少启用一种监控类型 (--ssl/--process/--system/--stdio)")
 		os.Exit(1)
 	}
-
 	if cfg.Stdio.Enabled && cfg.PID == 0 {
 		cliErrln(cmd, "--stdio 需要指定 --pid")
 		os.Exit(1)
 	}
+}
+
+// SSLPipelineConfig 描述 SSL 分析管道的构建参数（trace 和 ssl 命令共用）
+type SSLPipelineConfig struct {
+	SSLFilters  []string
+	HTTPRaw     bool
+	HTTPPCap    string
+	HTTPFilters []string
+	DisableAuth bool
+}
+
+// buildSSLAnalyzerChain 构建 SSL 分析器链：SSL 过滤 → SSE 合并 → HTTP 解析 → pcap → HTTP 过滤 → 认证头移除
+func buildSSLAnalyzerChain(cmd *cobra.Command, sslCfg SSLPipelineConfig) []pipelinetypes.Analyzer {
+	var analyzers []pipelinetypes.Analyzer
+	if len(sslCfg.SSLFilters) > 0 {
+		analyzers = append(analyzers, pipelinetransforms.NewSSLFilter(sslCfg.SSLFilters))
+	}
+	analyzers = append(analyzers, pipelinetransforms.NewSSEMerger())
+	// When writing pcap, force raw data inclusion so payloads stay faithful.
+	includeRaw := sslCfg.HTTPRaw || sslCfg.HTTPPCap != ""
+	analyzers = append(analyzers, pipelinetransforms.NewHTTPParser(includeRaw))
+	if sslCfg.HTTPPCap != "" {
+		pcapW, err := pipelinetransforms.NewHTTPPCAPWriter(sslCfg.HTTPPCap)
+		if err != nil {
+			cliErrf(cmd, "HTTP pcap: %v\n", err)
+			os.Exit(1)
+		}
+		if pcapW != nil {
+			analyzers = append(analyzers, pcapW)
+		}
+	}
+	if len(sslCfg.HTTPFilters) > 0 {
+		analyzers = append(analyzers, pipelinetransforms.NewHTTPFilter(sslCfg.HTTPFilters))
+	}
+	if !sslCfg.DisableAuth {
+		analyzers = append(analyzers, pipelinetransforms.NewAuthRemover())
+	}
+	return analyzers
+}
+
+// buildRunners 根据配置构建 process/system/stdio runner 列表
+func buildRunners(cfg TraceConfig) []pipelinetypes.Runner {
+	var runners []pipelinetypes.Runner
+	if cfg.Process.Enabled {
+		procConfig := processcollector.Config{
+			MinDurationMs: int64(cfg.Process.Duration),
+			PID:           cfg.PID,
+			FilterMode:    cfg.Process.Mode,
+		}
+		if cfg.Comm != "" {
+			procConfig.Commands = splitComm(cfg.Comm)
+		}
+		runners = append(runners, processcollector.New(procConfig))
+	}
+	if cfg.System.Enabled {
+		runners = append(runners, systemcollector.New(systemcollector.Config{
+			IntervalSeconds: cfg.System.Interval,
+			PID:             cfg.PID,
+			Comm:            cfg.Comm,
+			IncludeChildren: true,
+		}))
+	}
+	if cfg.Stdio.Enabled {
+		runners = append(runners, stdiocollector.New(stdiocollector.Config{
+			PID:      cfg.PID,
+			UID:      cfg.Stdio.UID,
+			Comm:     cfg.Stdio.Comm,
+			AllFDs:   cfg.Stdio.AllFDs,
+			MaxBytes: cfg.Stdio.MaxBytes,
+		}))
+	}
+	return runners
+}
+
+// buildSinks 构建输出 sink 列表和可选的 analytics DB 连接
+func buildSinks(cmd *cobra.Command, cfg TraceConfig) ([]pipelinetypes.Sink, *sql.DB) {
+	var sinks []pipelinetypes.Sink
+	var analyticsDB *sql.DB
+	if cfg.Output.DuckDBPath != "" {
+		duckdbSink, err := pipelinesink.NewDuckDBSink(pipelinesink.DuckDBConfig{
+			DBPath:     cfg.Output.DuckDBPath,
+			CommFilter: cfg.Comm,
+			BinaryPath: cfg.SSL.BinaryPath,
+		})
+		if err != nil {
+			cliErrf(cmd, "启动 DuckDB 失败: %v\n", err)
+			os.Exit(1)
+		}
+		sinks = append(sinks, duckdbSink)
+		analyticsDB = duckdbSink.DB()
+	}
+	if cfg.Output.LogFile != "" {
+		sinks = append(sinks, pipelinesink.NewFileLogger(cfg.Output.LogFile, cfg.Output.RotateLogs, cfg.Output.MaxLogSize))
+	}
+	if !cfg.Output.Quiet {
+		sinks = append(sinks, pipelinesink.NewOutput())
+	}
+	return sinks, analyticsDB
+}
+
+// buildGlobalTransforms 构建全局分析管道的 transform 列表
+func buildGlobalTransforms(sslEnabled bool) []pipelinetypes.Analyzer {
+	transforms := []pipelinetypes.Analyzer{pipelinetransforms.NewSecurityAnalyzer()}
+	if sslEnabled {
+		transforms = append(transforms, pipelinetransforms.NewClaudeToolCallAnalyzer())
+	} else {
+		transforms = append(transforms, pipelinetransforms.NewToolCallAggregator())
+	}
+	return transforms
+}
+
+// executeTrace 根据配置启动各 runner 和 analyzer 管道
+func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
+	validateTraceConfig(cmd, cfg)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -210,13 +328,37 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 	}
 	defer logging.Sync()
 
-	// allAnalyzers 收集所有 analyzer 实例，用于信号回调中上报指标
 	var allAnalyzers []pipelinetypes.Analyzer
+	var streams []<-chan *event.Event
 
+	// SSL 监控管道
+	if cfg.SSL.Enabled {
+		sslAnalyzers := buildSSLAnalyzerChain(cmd, SSLPipelineConfig{
+			SSLFilters:  cfg.SSL.Filter,
+			HTTPRaw:     cfg.SSL.Raw,
+			HTTPPCap:    cfg.SSL.HTTPPCapPath,
+			HTTPFilters: cfg.SSL.HTTPFilter,
+			DisableAuth: cfg.SSL.DisableAuth,
+		})
+		allAnalyzers = append(allAnalyzers, sslAnalyzers...)
+
+		sslRunner := sslcollector.New(sslcollector.Config{
+			PID: cfg.PID, UID: cfg.SSL.UID, Comm: cfg.Comm,
+			BinaryPath: cfg.SSL.BinaryPath, OpenSSL: true, Handshake: cfg.SSL.Handshake,
+		})
+		events, err := sslRunner.Run(ctx)
+		if err != nil {
+			cliErrf(cmd, "启动 SSL 监控失败: %v\n", err)
+			os.Exit(1)
+		}
+		streams = append(streams, pipelinecore.Chain(sslAnalyzers...).Process(ctx, events))
+	}
+
+	// 信号处理
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		<-sigCh // 收到信号后，打印所有 analyzer 的指标
+		<-sigCh
 		for _, a := range allAnalyzers {
 			if r, ok := a.(pipelinetypes.MetricsReporter); ok {
 				r.ReportMetrics()
@@ -225,82 +367,8 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 		cancel()
 	}()
 
-	var runners []pipelinetypes.Runner
-	var streams []<-chan *event.Event
-
-	// 构建 SSL 监控管道：过滤器 -> SSE 合并 -> HTTP 解析 -> 认证头移除
-	if cfg.SSL.Enabled {
-		sslConfig := sslcollector.Config{
-			PID:        cfg.PID,
-			UID:        cfg.SSL.UID,
-			Comm:       cfg.Comm,
-			BinaryPath: cfg.SSL.BinaryPath,
-			OpenSSL:    true,
-			Handshake:  cfg.SSL.Handshake,
-		}
-
-		sslRunner := sslcollector.New(sslConfig)
-
-		sslAnalyzers := []pipelinetypes.Analyzer{}
-		if len(cfg.SSL.Filter) > 0 {
-			sslAnalyzers = append(sslAnalyzers, pipelinetransforms.NewSSLFilter(cfg.SSL.Filter))
-		}
-		sslAnalyzers = append(sslAnalyzers, pipelinetransforms.NewSSEMerger())
-		sslAnalyzers = append(sslAnalyzers, pipelinetransforms.NewHTTPParser(cfg.SSL.Raw))
-		if len(cfg.SSL.HTTPFilter) > 0 {
-			sslAnalyzers = append(sslAnalyzers, pipelinetransforms.NewHTTPFilter(cfg.SSL.HTTPFilter))
-		}
-		if !cfg.SSL.DisableAuth {
-			sslAnalyzers = append(sslAnalyzers, pipelinetransforms.NewAuthRemover())
-		}
-
-		allAnalyzers = append(allAnalyzers, sslAnalyzers...)
-
-		events, err := sslRunner.Run(ctx)
-		if err != nil {
-			cliErrf(cmd, "启动 SSL 监控失败: %v\n", err)
-			os.Exit(1)
-		}
-		sslStream := pipelinecore.Chain(sslAnalyzers...).Process(ctx, events)
-		streams = append(streams, sslStream)
-	}
-
-	if cfg.Process.Enabled {
-		procConfig := processcollector.Config{
-			MinDurationMs: int64(cfg.Process.Duration),
-			PID:           cfg.PID,
-			FilterMode:    cfg.Process.Mode,
-		}
-		if cfg.Comm != "" {
-			procConfig.Commands = splitComm(cfg.Comm)
-		}
-
-		procRunner := processcollector.New(procConfig)
-		runners = append(runners, procRunner)
-	}
-
-	if cfg.System.Enabled {
-		sysRunner := systemcollector.New(systemcollector.Config{
-			IntervalSeconds: cfg.System.Interval,
-			PID:             cfg.PID,
-			Comm:            cfg.Comm,
-			IncludeChildren: true,
-		})
-		runners = append(runners, sysRunner)
-	}
-
-	if cfg.Stdio.Enabled {
-		stdioRunner := stdiocollector.New(stdiocollector.Config{
-			PID:      cfg.PID,
-			UID:      cfg.Stdio.UID,
-			Comm:     cfg.Stdio.Comm,
-			AllFDs:   cfg.Stdio.AllFDs,
-			MaxBytes: cfg.Stdio.MaxBytes,
-		})
-		runners = append(runners, stdioRunner)
-	}
-
-	// 合并所有 runner 输出并构建全局分析管道
+	// 合并 runner 输出
+	runners := buildRunners(cfg)
 	combined := pipelinestream.NewCombinedRunner(runners...)
 	combinedStream, err := combined.Run(ctx)
 	if err != nil {
@@ -309,46 +377,14 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 	}
 	merged := pipelinestream.MergeStreams(ctx, append(streams, combinedStream)...)
 
-	// DuckDB sink（在 server 之前创建，以便传递 DB 给 analytics API）
-	var analyticsDB *sql.DB
-	var sinks []pipelinetypes.Sink
-	if cfg.Output.DuckDBPath != "" {
-		duckdbSink, err := pipelinesink.NewDuckDBSink(pipelinesink.DuckDBConfig{
-			DBPath:     cfg.Output.DuckDBPath,
-			CommFilter: cfg.Comm,
-			BinaryPath: cfg.SSL.BinaryPath,
-		})
-		if err != nil {
-			cliErrf(cmd, "启动 DuckDB 失败: %v\n", err)
-			os.Exit(1)
-		}
-		sinks = append(sinks, duckdbSink)
-		analyticsDB = duckdbSink.DB()
-	}
-
+	// Sink 和 Server
+	sinks, analyticsDB := buildSinks(cmd, cfg)
 	if cfg.Output.Server {
 		startServer(ctx, cfg.Output.ServerPort, analyticsDB)
 	}
 
-	// 全局处理管道：transform + sinks
-	var transforms []pipelinetypes.Analyzer
-	transforms = append(transforms, pipelinetransforms.NewSecurityAnalyzer())
-	// Use ClaudeToolCallAnalyzer for HTTP-based tool call identification;
-	// falls back to ToolCallAggregator when SSL/HTTP is disabled.
-	if cfg.SSL.Enabled {
-		transforms = append(transforms, pipelinetransforms.NewClaudeToolCallAnalyzer())
-	} else {
-		transforms = append(transforms, pipelinetransforms.NewToolCallAggregator())
-	}
-
-	if cfg.Output.LogFile != "" {
-		sinks = append(sinks, pipelinesink.NewFileLogger(cfg.Output.LogFile, cfg.Output.RotateLogs, cfg.Output.MaxLogSize))
-	}
-	if !cfg.Output.Quiet {
-		sinks = append(sinks, pipelinesink.NewOutput())
-	}
-
-	// 消费全局管道输出（无实时推送，仅由 sinks 处理与持久化）
+	// 全局管道
+	transforms := buildGlobalTransforms(cfg.SSL.Enabled)
 	p := pipeline.New().WithTransforms(transforms...).WithSinks(sinks...)
 	p.Drain(ctx, merged, nil)
 }

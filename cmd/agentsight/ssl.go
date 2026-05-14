@@ -18,6 +18,7 @@ var (
 	sslFilters         []string
 	disableAuthRemoval bool
 	binaryPath         string
+	sslHTTPPCap string
 )
 
 var sslCmd = &cobra.Command{
@@ -37,10 +38,39 @@ func init() {
 	sslCmd.Flags().StringArrayVar(&sslFilters, "ssl-filter", nil, "SSL 过滤表达式")
 	sslCmd.Flags().BoolVar(&disableAuthRemoval, "disable-auth-removal", false, "禁用敏感头移除")
 	sslCmd.Flags().StringVar(&binaryPath, "binary-path", "", "SSL 库二进制路径")
+	sslCmd.Flags().StringVar(&sslHTTPPCap, "http-pcap", "", "将解析后的 HTTP 写入合成 TCP 的 pcap 文件路径（需 --http-parser，空则关闭）")
+}
+
+// buildSSLCmdHTTPAnalyzers 构建 ssl 命令的 HTTP 解析器链
+func buildSSLCmdHTTPAnalyzers(cmd *cobra.Command) []pipelinetypes.Analyzer {
+	includeRaw := httpRawData || sslHTTPPCap != ""
+	analyzers := []pipelinetypes.Analyzer{pipelinetransforms.NewHTTPParser(includeRaw)}
+	if sslHTTPPCap != "" {
+		pcapW, err := pipelinetransforms.NewHTTPPCAPWriter(sslHTTPPCap)
+		if err != nil {
+			cliErrf(cmd, "HTTP pcap: %v\n", err)
+			os.Exit(1)
+		}
+		if pcapW != nil {
+			analyzers = append(analyzers, pcapW)
+		}
+	}
+	if len(httpFilters) > 0 {
+		analyzers = append(analyzers, pipelinetransforms.NewHTTPFilter(httpFilters))
+	}
+	if !disableAuthRemoval {
+		analyzers = append(analyzers, pipelinetransforms.NewAuthRemover())
+	}
+	return analyzers
 }
 
 // runSSL 启动 SSL/TLS 流量监控并连接分析管道
 func runSSL(cmd *cobra.Command, args []string) {
+	if sslHTTPPCap != "" && !httpParser {
+		cliErrln(cmd, "--http-pcap 需要同时指定 --http-parser")
+		os.Exit(1)
+	}
+
 	var analyzers []pipelinetypes.Analyzer
 	if len(sslFilters) > 0 {
 		analyzers = append(analyzers, pipelinetransforms.NewSSLFilter(sslFilters))
@@ -49,13 +79,7 @@ func runSSL(cmd *cobra.Command, args []string) {
 		analyzers = append(analyzers, pipelinetransforms.NewSSEMerger())
 	}
 	if httpParser {
-		analyzers = append(analyzers, pipelinetransforms.NewHTTPParser(httpRawData))
-		if len(httpFilters) > 0 {
-			analyzers = append(analyzers, pipelinetransforms.NewHTTPFilter(httpFilters))
-		}
-		if !disableAuthRemoval {
-			analyzers = append(analyzers, pipelinetransforms.NewAuthRemover())
-		}
+		analyzers = append(analyzers, buildSSLCmdHTTPAnalyzers(cmd)...)
 	}
 	analyzers = append(analyzers, pipelinetransforms.NewToolCallAggregator())
 
