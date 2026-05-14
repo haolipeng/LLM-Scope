@@ -32,45 +32,54 @@ func SetupRouter(webAssets fs.FS, analyticsDB *sql.DB) *gin.Engine {
 	if webAssets != nil {
 		fileServer := http.FileServer(http.FS(webAssets))
 
-		r.NoRoute(func(c *gin.Context) {
-			if strings.HasPrefix(c.Request.URL.Path, "/api") {
-				c.Status(http.StatusNotFound)
-				return
-			}
-
-			reqPath := path.Clean(strings.TrimPrefix(c.Request.URL.Path, "/"))
-
-			if reqPath == "." || reqPath == "/" || reqPath == "" || reqPath == "index.html" {
-				c.Request.URL.Path = "/"
-				fileServer.ServeHTTP(c.Writer, c.Request)
-				return
-			}
-
-			// Next.js static export (trailingSlash): routes live at e.g. security/alerts/index.html
-			tryPaths := []string{reqPath, path.Join(reqPath, "index.html")}
-			for _, p := range tryPaths {
-				file, err := webAssets.Open(p)
-				if err != nil {
-					continue
-				}
-				stat, statErr := file.Stat()
-				_ = file.Close()
-				if statErr != nil {
-					continue
-				}
-				if stat.IsDir() {
-					continue
-				}
-				c.Request.URL.Path = "/" + p
-				fileServer.ServeHTTP(c.Writer, c.Request)
-				return
-			}
-
-			// SPA fallback: unknown path → root shell (client router may still 404 visually)
-			c.Request.URL.Path = "/"
-			fileServer.ServeHTTP(c.Writer, c.Request)
-		})
+		r.NoRoute(spaFallbackHandler(webAssets, fileServer))
 	}
 
 	return r
+}
+
+// spaFallbackHandler 处理前端 SPA 路由和静态文件服务
+func spaFallbackHandler(webAssets fs.FS, fileServer http.Handler) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api") {
+			c.Status(http.StatusNotFound)
+			return
+		}
+
+		reqPath := path.Clean(strings.TrimPrefix(c.Request.URL.Path, "/"))
+
+		if reqPath == "." || reqPath == "/" || reqPath == "" || reqPath == "index.html" {
+			c.Request.URL.Path = "/"
+			fileServer.ServeHTTP(c.Writer, c.Request)
+			return
+		}
+
+		if tryServeStaticFile(c, webAssets, fileServer, reqPath) {
+			return
+		}
+
+		// SPA fallback
+		c.Request.URL.Path = "/"
+		fileServer.ServeHTTP(c.Writer, c.Request)
+	}
+}
+
+// tryServeStaticFile 尝试从静态资源中提供文件，找到返回 true
+func tryServeStaticFile(c *gin.Context, webAssets fs.FS, fileServer http.Handler, reqPath string) bool {
+	tryPaths := []string{reqPath, path.Join(reqPath, "index.html")}
+	for _, p := range tryPaths {
+		file, err := webAssets.Open(p)
+		if err != nil {
+			continue
+		}
+		stat, statErr := file.Stat()
+		_ = file.Close()
+		if statErr != nil || stat.IsDir() {
+			continue
+		}
+		c.Request.URL.Path = "/" + p
+		fileServer.ServeHTTP(c.Writer, c.Request)
+		return true
+	}
+	return false
 }

@@ -11,7 +11,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
 
-	bpfprocess "github.com/haolipeng/LLM-Scope/internal/bpf/process"
+	bpf "github.com/haolipeng/LLM-Scope/internal/bpf/agentsight"
 	runtimebase "github.com/haolipeng/LLM-Scope/internal/collectors/base"
 	"github.com/haolipeng/LLM-Scope/internal/event"
 	"github.com/haolipeng/LLM-Scope/internal/logging"
@@ -82,7 +82,7 @@ type Config struct {
 type Runner struct {
 	runtimebase.BaseRunner
 	config      Config
-	objs        bpfprocess.Objects
+	objs        bpf.Objects
 	tracker     *PIDTracker
 	dedup       *FileDedup
 	rateLimiter *RateLimiter
@@ -117,7 +117,7 @@ func (r *Runner) Run(ctx context.Context) (<-chan *event.Event, error) {
 	}
 	r.tracker = NewPIDTracker(commands, filterMode, int32(r.config.PID))
 
-	spec, err := bpfprocess.LoadSpec()
+	spec, err := bpf.LoadSpec()
 	if err != nil {
 		return nil, fmt.Errorf("load BPF spec: %w", err)
 	}
@@ -138,7 +138,7 @@ func (r *Runner) Run(ctx context.Context) (<-chan *event.Event, error) {
 	tracked := r.tracker.PopulateFromProc()
 	logging.Named("process").Infof("initial tracked PIDs: %d, filter_mode=%d", tracked, filterMode)
 
-	if err := r.InitRingBuffer(r.objs.Rb); err != nil {
+	if err := r.InitRingBuffer(r.objs.RbProcess); err != nil {
 		r.CloseLinks()
 		r.objs.Close()
 		return nil, err
@@ -199,7 +199,10 @@ func (r *Runner) handleRawEvent(raw []byte) []*event.Event {
 
 	switch eventType {
 	case eventTypeProcess:
-		return r.handleProcessEvent(pid, ppid, exitCode, durationNs, timestampNs, comm, fullCommand, exitEvent, unionData)
+		if exitEvent {
+			return r.handleExitEvent(pid, ppid, exitCode, durationNs, timestampNs, comm)
+		}
+		return r.handleExecEvent(pid, ppid, timestampNs, comm, fullCommand, unionData)
 	case eventTypeBashReadline:
 		return r.handleBashReadline(pid, timestampNs, comm, unionData)
 	case eventTypeFileOp:
@@ -217,80 +220,68 @@ func (r *Runner) handleRawEvent(raw []byte) []*event.Event {
 	return nil
 }
 
-// handleProcessEvent 处理进程事件
-func (r *Runner) handleProcessEvent(pid, ppid int32, exitCode uint32, durationNs, timestampNs uint64, comm, fullCommand string, exitEvent bool, unionData []byte) []*event.Event {
-	var events []*event.Event
-
-	if exitEvent {
-		isTracked := r.tracker.IsTracked(pid)
-		r.tracker.Remove(pid)
-		if !isTracked && r.tracker.filterMode == FilterModeFilter {
-			return nil
-		}
-
-		data := map[string]interface{}{
-			"timestamp": timestampNs,
-			"event":     "EXIT",
-			"comm":      comm,
-			"pid":       pid,
-			"ppid":      ppid,
-			"exit_code": exitCode,
-		}
-		if durationNs > 0 {
-			data["duration_ms"] = durationNs / 1_000_000
-		}
-		if r.rateLimiter.FlushPID(pid) {
-			data["rate_limit_warning"] = fmt.Sprintf("Process had %d+ file ops per second", maxDistinctFilesPerSec)
-		}
-		events = append(events, r.makeEvent(timestampNs, pid, comm, data))
-		for _, expired := range r.dedup.FlushPID(pid) {
-			expData := map[string]interface{}{
-				"timestamp": timestampNs,
-				"event":     "FILE_OPEN",
-				"comm":      expired.Comm,
-				"pid":       expired.PID,
-				"count":     expired.Count,
-				"filepath":  expired.Filepath,
-				"flags":     expired.Flags,
-				"reason":    "process_exit",
-			}
-			events = append(events, r.makeEvent(timestampNs, expired.PID, expired.Comm, expData))
-		}
-	} else {
-		filename := cStringFromBytes(unionData[:fileOpFilepathLen])
-		shouldTrack := r.tracker.ShouldTrackProcess(comm, pid, ppid)
-		if shouldTrack {
-			r.tracker.Add(pid, ppid)
-			data := map[string]interface{}{
-				"timestamp":    timestampNs,
-				"event":        "EXEC",
-				"comm":         comm,
-				"pid":          pid,
-				"ppid":         ppid,
-				"filename":     filename,
-				"full_command": fullCommand,
-			}
-			events = append(events, r.makeEvent(timestampNs, pid, comm, data))
-		} else if r.tracker.filterMode == FilterModeFilter {
-			return nil
-		} else {
-			if r.tracker.filterMode == FilterModeProc {
-				r.tracker.Add(pid, ppid)
-			}
-			data := map[string]interface{}{
-				"timestamp":    timestampNs,
-				"event":        "EXEC",
-				"comm":         comm,
-				"pid":          pid,
-				"ppid":         ppid,
-				"filename":     filename,
-				"full_command": fullCommand,
-			}
-			events = append(events, r.makeEvent(timestampNs, pid, comm, data))
-		}
+// handleExitEvent 处理进程退出事件
+func (r *Runner) handleExitEvent(pid, ppid int32, exitCode uint32, durationNs, timestampNs uint64, comm string) []*event.Event {
+	isTracked := r.tracker.IsTracked(pid)
+	r.tracker.Remove(pid)
+	if !isTracked && r.tracker.filterMode == FilterModeFilter {
+		return nil
 	}
 
+	data := map[string]interface{}{
+		"timestamp": timestampNs,
+		"event":     "EXIT",
+		"comm":      comm,
+		"pid":       pid,
+		"ppid":      ppid,
+		"exit_code": exitCode,
+	}
+	if durationNs > 0 {
+		data["duration_ms"] = durationNs / 1_000_000
+	}
+	if r.rateLimiter.FlushPID(pid) {
+		data["rate_limit_warning"] = fmt.Sprintf("Process had %d+ file ops per second", maxDistinctFilesPerSec)
+	}
+
+	events := []*event.Event{r.makeEvent(timestampNs, pid, comm, data)}
+	for _, expired := range r.dedup.FlushPID(pid) {
+		expData := map[string]interface{}{
+			"timestamp": timestampNs,
+			"event":     "FILE_OPEN",
+			"comm":      expired.Comm,
+			"pid":       expired.PID,
+			"count":     expired.Count,
+			"filepath":  expired.Filepath,
+			"flags":     expired.Flags,
+			"reason":    "process_exit",
+		}
+		events = append(events, r.makeEvent(timestampNs, expired.PID, expired.Comm, expData))
+	}
 	return events
+}
+
+// handleExecEvent 处理进程执行事件
+func (r *Runner) handleExecEvent(pid, ppid int32, timestampNs uint64, comm, fullCommand string, unionData []byte) []*event.Event {
+	filename := cStringFromBytes(unionData[:fileOpFilepathLen])
+	shouldTrack := r.tracker.ShouldTrackProcess(comm, pid, ppid)
+
+	if !shouldTrack && r.tracker.filterMode == FilterModeFilter {
+		return nil
+	}
+	if shouldTrack || r.tracker.filterMode == FilterModeProc {
+		r.tracker.Add(pid, ppid)
+	}
+
+	data := map[string]interface{}{
+		"timestamp":    timestampNs,
+		"event":        "EXEC",
+		"comm":         comm,
+		"pid":          pid,
+		"ppid":         ppid,
+		"filename":     filename,
+		"full_command": fullCommand,
+	}
+	return []*event.Event{r.makeEvent(timestampNs, pid, comm, data)}
 }
 
 // handleBashReadline 处理bash读写事件
@@ -320,59 +311,73 @@ func (r *Runner) handleFileOp(pid int32, timestampNs uint64, comm string, unionD
 	flags := int32(le.Uint32(unionData[fileOpFlagsOff:]))
 	opType := le.Uint32(unionData[fileOpTypeOff:])
 
-	if opType == fileOpOpen && isNoiseFilePath(filepath) {
+	switch opType {
+	case fileOpOpen:
+		return r.handleFileOpen(pid, timestampNs, comm, filepath, flags)
+	case fileOpDelete:
+		return r.handleFileDelete(pid, timestampNs, comm, filepath, flags)
+	}
+	return nil
+}
+
+// handleFileOpen 处理文件打开事件
+func (r *Runner) handleFileOpen(pid int32, timestampNs uint64, comm, filepath string, flags int32) []*event.Event {
+	if isNoiseFilePath(filepath) {
 		return nil
 	}
 
-	var events []*event.Event
-	switch opType {
-	case fileOpOpen:
-		rl := r.rateLimiter.Check(pid, timestampNs)
-		if rl.ShouldDrop {
-			return nil
-		}
-		dedupResult := r.dedup.CheckFileOpen(pid, filepath, flags, comm, timestampNs)
-		for _, expired := range dedupResult.Expired {
-			expData := map[string]interface{}{
-				"timestamp":      timestampNs,
-				"event":          "FILE_OPEN",
-				"comm":           expired.Comm,
-				"pid":            expired.PID,
-				"count":          expired.Count,
-				"filepath":       expired.Filepath,
-				"flags":          expired.Flags,
-				"window_expired": true,
-			}
-			events = append(events, r.makeEvent(timestampNs, expired.PID, expired.Comm, expData))
-		}
-		if !dedupResult.ShouldEmit {
-			return events
-		}
-		data := map[string]interface{}{
-			"timestamp": timestampNs,
-			"event":     "FILE_OPEN",
-			"comm":      comm,
-			"pid":       pid,
-			"count":     dedupResult.Count,
-			"filepath":  filepath,
-			"flags":     flags,
-		}
-		if rl.AddWarning {
-			data["rate_limit_warning"] = fmt.Sprintf("Previous second exceeded %d file limit", maxDistinctFilesPerSec)
-		}
-		events = append(events, r.makeEvent(timestampNs, pid, comm, data))
-	case fileOpDelete:
-		data := map[string]interface{}{
-			"timestamp": timestampNs,
-			"event":     "FILE_DELETE",
-			"comm":      comm,
-			"pid":       pid,
-			"filepath":  filepath,
-			"flags":     flags,
-		}
-		events = append(events, r.makeEvent(timestampNs, pid, comm, data))
+	rl := r.rateLimiter.Check(pid, timestampNs)
+	if rl.ShouldDrop {
+		return nil
 	}
-	return events
+
+	dedupResult := r.dedup.CheckFileOpen(pid, filepath, flags, comm, timestampNs)
+
+	var events []*event.Event
+	for _, expired := range dedupResult.Expired {
+		expData := map[string]interface{}{
+			"timestamp":      timestampNs,
+			"event":          "FILE_OPEN",
+			"comm":           expired.Comm,
+			"pid":            expired.PID,
+			"count":          expired.Count,
+			"filepath":       expired.Filepath,
+			"flags":          expired.Flags,
+			"window_expired": true,
+		}
+		events = append(events, r.makeEvent(timestampNs, expired.PID, expired.Comm, expData))
+	}
+
+	if !dedupResult.ShouldEmit {
+		return events
+	}
+
+	data := map[string]interface{}{
+		"timestamp": timestampNs,
+		"event":     "FILE_OPEN",
+		"comm":      comm,
+		"pid":       pid,
+		"count":     dedupResult.Count,
+		"filepath":  filepath,
+		"flags":     flags,
+	}
+	if rl.AddWarning {
+		data["rate_limit_warning"] = fmt.Sprintf("Previous second exceeded %d file limit", maxDistinctFilesPerSec)
+	}
+	return append(events, r.makeEvent(timestampNs, pid, comm, data))
+}
+
+// handleFileDelete 处理文件删除事件
+func (r *Runner) handleFileDelete(pid int32, timestampNs uint64, comm, filepath string, flags int32) []*event.Event {
+	data := map[string]interface{}{
+		"timestamp": timestampNs,
+		"event":     "FILE_DELETE",
+		"comm":      comm,
+		"pid":       pid,
+		"filepath":  filepath,
+		"flags":     flags,
+	}
+	return []*event.Event{r.makeEvent(timestampNs, pid, comm, data)}
 }
 
 // handleCredChange 处理凭证变更事件
@@ -507,36 +512,38 @@ func ipv4ToString(ip uint32) string {
 	return net.IPv4(byte(ip), byte(ip>>8), byte(ip>>16), byte(ip>>24)).String()
 }
 
+// Noise file path rules — declarative tables for easy extension.
+var (
+	noisePrefixes = []string{
+		"/proc/", "/sys/", "/dev/",
+		"/usr/lib/", "/lib/", "/usr/share/",
+	}
+	noiseSuffixes  = []string{".so", ".lock", ".pid"}
+	noiseContains  = []string{".so.", ".cursor-server/", "/node_modules/", "/.git/objects/"}
+)
+
 // isNoiseFilePath 判断是否为噪声文件路径
 func isNoiseFilePath(path string) bool {
-	if strings.HasPrefix(path, "/proc/") {
-		return true
+	for _, p := range noisePrefixes {
+		if strings.HasPrefix(path, p) {
+			return true
+		}
 	}
-	if strings.HasPrefix(path, "/sys/") || strings.HasPrefix(path, "/dev/") {
-		return true
-	}
-	if strings.HasPrefix(path, "/usr/lib/") ||
-		strings.HasPrefix(path, "/lib/") ||
-		strings.HasPrefix(path, "/usr/share/") {
-		return true
-	}
+	// /etc/ 特殊处理：仅过滤 linker cache，/etc/passwd 等安全敏感文件需保留
 	if strings.HasPrefix(path, "/etc/") {
-		// only filter linker cache; /etc/passwd, /etc/shadow etc. are security-sensitive
 		return path == "/etc/ld.so.cache" || strings.HasPrefix(path, "/etc/ld.so")
 	}
-	if strings.HasSuffix(path, ".so") || strings.Contains(path, ".so.") {
-		return true
+	for _, s := range noiseSuffixes {
+		if strings.HasSuffix(path, s) {
+			return true
+		}
 	}
-	if strings.Contains(path, ".cursor-server/") {
-		return true
+	for _, c := range noiseContains {
+		if strings.Contains(path, c) {
+			return true
+		}
 	}
-	if strings.Contains(path, "/node_modules/") {
-		return true
-	}
-	if strings.HasPrefix(path, ".git/objects/") || strings.Contains(path, "/.git/objects/") {
-		return true
-	}
-	if strings.HasSuffix(path, ".lock") || strings.HasSuffix(path, ".pid") {
+	if strings.HasPrefix(path, ".git/objects/") {
 		return true
 	}
 	return false

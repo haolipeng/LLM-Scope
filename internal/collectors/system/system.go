@@ -56,36 +56,38 @@ func (s *Runner) Run(ctx context.Context) (<-chan *event.Event, error) {
 			case <-ctx.Done():
 				return
 			case <-interval.C:
-				timestamp := getBootTimeNs()
-
-				targets := s.findTargetPIDs()
-				if len(targets) == 0 {
-					if s.config.PID != 0 || s.config.Comm != "" {
-						continue
-					}
-					event, err := systemWideMetrics(timestamp)
-					if err == nil {
-						out <- event
-					}
-					continue
-				}
-
-				for _, pid := range targets {
-					pids := []uint32{pid}
-					if s.config.IncludeChildren {
-						pids = append(pids, getAllChildren(pid)...)
-					}
-					event, err := collectProcessMetrics(pid, pids, timestamp, previous, s.config)
-					if err != nil {
-						continue
-					}
-					out <- event
-				}
+				s.collectOnTick(out, previous)
 			}
 		}
 	}()
 
 	return out, nil
+}
+
+// collectOnTick 在每个采集周期执行一次指标采集
+func (s *Runner) collectOnTick(out chan<- *event.Event, previous map[uint32]processStats) {
+	timestamp := getBootTimeNs()
+	targets := s.findTargetPIDs()
+
+	if len(targets) == 0 {
+		if s.config.PID != 0 || s.config.Comm != "" {
+			return
+		}
+		if ev, err := systemWideMetrics(timestamp); err == nil {
+			out <- ev
+		}
+		return
+	}
+
+	for _, pid := range targets {
+		pids := []uint32{pid}
+		if s.config.IncludeChildren {
+			pids = append(pids, getAllChildren(pid)...)
+		}
+		if ev, err := collectProcessMetrics(pid, pids, timestamp, previous, s.config); err == nil {
+			out <- ev
+		}
+	}
 }
 
 func (s *Runner) Stop() error {
@@ -195,46 +197,51 @@ func getAllChildren(parent uint32) []uint32 {
 	return children
 }
 
-// collectProcessMetrics 采集目标进程组的 CPU/内存/线程指标
-func collectProcessMetrics(pid uint32, allPids []uint32, timestamp uint64, previous map[uint32]processStats, cfg Config) (*event.Event, error) {
-	var totalRSS uint64
-	var totalVSZ uint64
-	var totalCPU float64
-	var threads uint32
-	processName := "unknown"
+// processGroupMetrics 保存进程组聚合后的指标
+type processGroupMetrics struct {
+	totalRSS uint64
+	totalVSZ uint64
+	totalCPU float64
+	threads  uint32
+}
 
-	if comm, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid)); err == nil {
-		processName = strings.TrimSpace(string(comm))
-	}
-
+// aggregatePIDMetrics 聚合进程组的 CPU/内存/线程指标
+func aggregatePIDMetrics(pid uint32, allPids []uint32, previous map[uint32]processStats, timestamp uint64) processGroupMetrics {
+	var m processGroupMetrics
 	for _, current := range allPids {
 		if !processExists(current) {
 			continue
 		}
 		if rss, vsz, err := processMemory(current); err == nil {
-			totalRSS += rss
-			totalVSZ += vsz
+			m.totalRSS += rss
+			m.totalVSZ += vsz
 		}
 		if stats, err := processCPUStats(current); err == nil {
-			cpuPercent := calculateCPUPercent(current, stats, previous, timestamp)
-			totalCPU += cpuPercent
+			m.totalCPU += calculateCPUPercent(current, stats, previous, timestamp)
 		}
 		if current == pid {
-			threads = threadCount(current)
+			m.threads = threadCount(current)
 		}
 	}
+	return m
+}
 
+func shouldAlert(cfg Config, cpu float64, rssKB uint64) bool {
+	return (cfg.CPUThreshold > 0 && cpu >= cfg.CPUThreshold) ||
+		(cfg.MemoryThreshold > 0 && int(rssKB/1024) >= cfg.MemoryThreshold)
+}
+
+// collectProcessMetrics 采集目标进程组的 CPU/内存/线程指标
+func collectProcessMetrics(pid uint32, allPids []uint32, timestamp uint64, previous map[uint32]processStats, cfg Config) (*event.Event, error) {
+	processName := "unknown"
+	if comm, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid)); err == nil {
+		processName = strings.TrimSpace(string(comm))
+	}
+
+	m := aggregatePIDMetrics(pid, allPids, previous, timestamp)
 	childrenCount := len(allPids)
 	if childrenCount > 0 {
-		childrenCount -= 1
-	}
-
-	alert := false
-	if cfg.CPUThreshold > 0 && totalCPU >= cfg.CPUThreshold {
-		alert = true
-	}
-	if cfg.MemoryThreshold > 0 && int(totalRSS/1024) >= cfg.MemoryThreshold {
-		alert = true
+		childrenCount--
 	}
 
 	payload := map[string]interface{}{
@@ -243,20 +250,20 @@ func collectProcessMetrics(pid uint32, allPids []uint32, timestamp uint64, previ
 		"comm":      processName,
 		"timestamp": timestamp,
 		"cpu": map[string]interface{}{
-			"percent": fmt.Sprintf("%.2f", totalCPU),
+			"percent": fmt.Sprintf("%.2f", m.totalCPU),
 			"cores":   cpuCores(),
 		},
 		"memory": map[string]interface{}{
-			"rss_kb": totalRSS,
-			"rss_mb": totalRSS / 1024,
-			"vsz_kb": totalVSZ,
-			"vsz_mb": totalVSZ / 1024,
+			"rss_kb": m.totalRSS,
+			"rss_mb": m.totalRSS / 1024,
+			"vsz_kb": m.totalVSZ,
+			"vsz_mb": m.totalVSZ / 1024,
 		},
 		"process": map[string]interface{}{
-			"threads":  threads,
+			"threads":  m.threads,
 			"children": childrenCount,
 		},
-		"alert": alert,
+		"alert": shouldAlert(cfg, m.totalCPU, m.totalRSS),
 	}
 
 	data, err := json.Marshal(payload)

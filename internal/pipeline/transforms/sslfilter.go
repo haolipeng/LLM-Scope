@@ -30,6 +30,7 @@ type SSLFilter struct {
 	total    atomic.Int64
 	filtered atomic.Int64
 	passed   atomic.Int64
+	inner    *mapAnalyzer
 }
 
 func NewSSLFilter(patterns []string) *SSLFilter {
@@ -37,7 +38,9 @@ func NewSSLFilter(patterns []string) *SSLFilter {
 	for _, pattern := range patterns {
 		filters = append(filters, parseSSLFilter(pattern))
 	}
-	return &SSLFilter{filters: filters}
+	f := &SSLFilter{filters: filters}
+	f.inner = NewMapAnalyzer("ssl_filter", f.processEvent)
+	return f
 }
 
 func (f *SSLFilter) Name() string {
@@ -45,35 +48,22 @@ func (f *SSLFilter) Name() string {
 }
 
 func (f *SSLFilter) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
-	out := make(chan *event.Event)
+	return f.inner.Process(ctx, in)
+}
 
-	go func() {
-		defer close(out)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case event, ok := <-in:
-				if !ok {
-					return
-				}
-				if event.Source == "ssl" {
-					f.total.Add(1)
-					globalSSLFilterTotal.Add(1)
-					if f.shouldFilter(event.Data) {
-						f.filtered.Add(1)
-						globalSSLFilterFiltered.Add(1)
-						continue
-					}
-					f.passed.Add(1)
-					globalSSLFilterPassed.Add(1)
-				}
-				out <- event
-			}
+func (f *SSLFilter) processEvent(ev *event.Event) []*event.Event {
+	if ev.Source == "ssl" {
+		f.total.Add(1)
+		globalSSLFilterTotal.Add(1)
+		if f.shouldFilter(ev.Data) {
+			f.filtered.Add(1)
+			globalSSLFilterFiltered.Add(1)
+			return nil
 		}
-	}()
-
-	return out
+		f.passed.Add(1)
+		globalSSLFilterPassed.Add(1)
+	}
+	return []*event.Event{ev}
 }
 
 type sslFilterExpression struct {
@@ -237,41 +227,69 @@ func evalSSLNode(node sslFilterNode, data map[string]interface{}) bool {
 	}
 }
 
-func evalSSLCondition(node sslFilterNode, data map[string]interface{}) bool {
-	switch node.field {
-	case "data.type":
+type sslFieldEvaluator func(data map[string]interface{}, node sslFilterNode) bool
+
+func evalSSLStringField(field string) sslFieldEvaluator {
+	return func(data map[string]interface{}, node sslFilterNode) bool {
+		if value, ok := data[field].(string); ok {
+			return compareStrings(value, node.operator, node.value)
+		}
+		return false
+	}
+}
+
+func evalSSLBoolField(field string) sslFieldEvaluator {
+	return func(data map[string]interface{}, node sslFilterNode) bool {
+		if value, ok := data[field].(bool); ok {
+			return (value && node.value == "true") || (!value && node.value == "false")
+		}
+		return false
+	}
+}
+
+func evalSSLUint64Field(field string) sslFieldEvaluator {
+	return func(data map[string]interface{}, node sslFilterNode) bool {
+		if value, ok := toUint64(data[field]); ok {
+			return compareNumbers(value, node.operator, node.value)
+		}
+		return false
+	}
+}
+
+func evalSSLFloat64Field(field string) sslFieldEvaluator {
+	return func(data map[string]interface{}, node sslFilterNode) bool {
+		if value, ok := toFloat64(data[field]); ok {
+			return compareFloats(value, node.operator, node.value)
+		}
+		return false
+	}
+}
+
+var sslFieldEvaluators = map[string]sslFieldEvaluator{
+	"data.type": func(data map[string]interface{}, node sslFilterNode) bool {
 		if value, ok := data["data"].(string); ok {
 			return compareStrings(detectDataType(value), node.operator, node.value)
 		}
 		return false
-	case "data":
-		if value, ok := data["data"].(string); ok {
-			return compareStrings(value, node.operator, node.value)
-		}
-		return false
-	case "function", "comm":
-		if value, ok := data[node.field].(string); ok {
-			return compareStrings(value, node.operator, node.value)
-		}
-		return false
-	case "is_handshake", "truncated":
-		if value, ok := data[node.field].(bool); ok {
-			return (value && node.value == "true") || (!value && node.value == "false")
-		}
-		return false
-	case "len", "pid", "tid", "uid", "timestamp_ns":
-		if value, ok := toUint64(data[node.field]); ok {
-			return compareNumbers(value, node.operator, node.value)
-		}
-		return false
-	case "latency_ms":
-		if value, ok := toFloat64(data[node.field]); ok {
-			return compareFloats(value, node.operator, node.value)
-		}
-		return false
-	default:
-		return false
+	},
+	"data":         evalSSLStringField("data"),
+	"function":     evalSSLStringField("function"),
+	"comm":         evalSSLStringField("comm"),
+	"is_handshake": evalSSLBoolField("is_handshake"),
+	"truncated":    evalSSLBoolField("truncated"),
+	"len":          evalSSLUint64Field("len"),
+	"pid":          evalSSLUint64Field("pid"),
+	"tid":          evalSSLUint64Field("tid"),
+	"uid":          evalSSLUint64Field("uid"),
+	"timestamp_ns": evalSSLUint64Field("timestamp_ns"),
+	"latency_ms":   evalSSLFloat64Field("latency_ms"),
+}
+
+func evalSSLCondition(node sslFilterNode, data map[string]interface{}) bool {
+	if fn, ok := sslFieldEvaluators[node.field]; ok {
+		return fn(data, node)
 	}
+	return false
 }
 
 func (f *SSLFilter) ReportMetrics() {

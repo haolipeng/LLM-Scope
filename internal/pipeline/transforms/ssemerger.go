@@ -15,6 +15,7 @@ type SSEMerger struct {
 	timeout time.Duration
 	mu      sync.Mutex
 	buffers map[string]*sseAccumulator
+	inner   *statefulAnalyzer
 }
 
 func NewSSEMerger() *SSEMerger {
@@ -22,10 +23,27 @@ func NewSSEMerger() *SSEMerger {
 }
 
 func NewSSEMergerWithTimeout(timeout time.Duration) *SSEMerger {
-	return &SSEMerger{
+	s := &SSEMerger{
 		timeout: timeout,
 		buffers: make(map[string]*sseAccumulator),
 	}
+	s.inner = NewStatefulAnalyzer("sse_merger", StatefulOpts{
+		TickInterval: timeout,
+		OnEvent: func(ev *event.Event, emit func(*event.Event)) {
+			if ev.Source != "ssl" {
+				emit(ev)
+				return
+			}
+			s.handleEvent(ev, emit)
+		},
+		OnTick: func(emit func(*event.Event)) {
+			s.flushExpired(emit)
+		},
+		OnClose: func(emit func(*event.Event)) {
+			s.flushAll(emit)
+		},
+	})
+	return s
 }
 
 func (s *SSEMerger) Name() string {
@@ -33,53 +51,25 @@ func (s *SSEMerger) Name() string {
 }
 
 func (s *SSEMerger) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
-	out := make(chan *event.Event)
-
-	go func() {
-		defer close(out)
-		ticker := time.NewTicker(s.timeout)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				s.flushAll(out)
-				return
-			case <-ticker.C:
-				s.flushExpired(out)
-			case event, ok := <-in:
-				if !ok {
-					s.flushAll(out)
-					return
-				}
-				if event.Source != "ssl" {
-					out <- event
-					continue
-				}
-				s.handleEvent(event, out)
-			}
-		}
-	}()
-
-	return out
+	return s.inner.Process(ctx, in)
 }
 
-func (s *SSEMerger) handleEvent(event *event.Event, out chan<- *event.Event) {
+func (s *SSEMerger) handleEvent(event *event.Event, emit func(*event.Event)) {
 	var payload map[string]interface{}
 	if err := json.Unmarshal(event.Data, &payload); err != nil {
-		out <- event
+		emit(event)
 		return
 	}
 
 	data, _ := payload["data"].(string)
 	if data == "" || !isSSEData(data) {
-		out <- event
+		emit(event)
 		return
 	}
 
 	sseEvents := parseSSEEvents(data)
 	if len(sseEvents) == 0 {
-		out <- event
+		emit(event)
 		return
 	}
 
@@ -96,7 +86,7 @@ func (s *SSEMerger) handleEvent(event *event.Event, out chan<- *event.Event) {
 
 	key, messageID := s.connectionID(event, sseEvents, payload)
 	if key == "" {
-		out <- event
+		emit(event)
 		return
 	}
 
@@ -120,37 +110,41 @@ func (s *SSEMerger) handleEvent(event *event.Event, out chan<- *event.Event) {
 	s.mu.Unlock()
 
 	if completed {
-		if acc.hasMeaningfulContent() {
-			merged := acc.toEvent(event)
-			s.mu.Lock()
-			delete(s.buffers, key)
-			s.mu.Unlock()
-			if merged != nil {
-				out <- merged
-			}
-		} else {
-			s.mu.Lock()
-			delete(s.buffers, key)
-			s.mu.Unlock()
-		}
+		s.tryComplete(key, acc, event, emit)
 	}
 }
 
-func (s *SSEMerger) flushAll(out chan<- *event.Event) {
+func (s *SSEMerger) tryComplete(key string, acc *sseAccumulator, ev *event.Event, emit func(*event.Event)) {
+	if acc.hasMeaningfulContent() {
+		merged := acc.toEvent(ev)
+		s.mu.Lock()
+		delete(s.buffers, key)
+		s.mu.Unlock()
+		if merged != nil {
+			emit(merged)
+		}
+		return
+	}
+	s.mu.Lock()
+	delete(s.buffers, key)
+	s.mu.Unlock()
+}
+
+func (s *SSEMerger) flushAll(emit func(*event.Event)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for key, acc := range s.buffers {
 		if acc.hasMeaningfulContent() {
 			event := acc.toEvent(nil)
 			if event != nil {
-				out <- event
+				emit(event)
 			}
 		}
 		delete(s.buffers, key)
 	}
 }
 
-func (s *SSEMerger) flushExpired(out chan<- *event.Event) {
+func (s *SSEMerger) flushExpired(emit func(*event.Event)) {
 	now := time.Now()
 	s.mu.Lock()
 	for key, acc := range s.buffers {
@@ -158,7 +152,7 @@ func (s *SSEMerger) flushExpired(out chan<- *event.Event) {
 			if acc.hasMeaningfulContent() {
 				event := acc.toEvent(nil)
 				if event != nil {
-					out <- event
+					emit(event)
 				}
 			}
 			delete(s.buffers, key)

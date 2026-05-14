@@ -30,6 +30,7 @@ type HTTPFilter struct {
 	total    atomic.Int64
 	filtered atomic.Int64
 	passed   atomic.Int64
+	inner    *mapAnalyzer
 }
 
 func NewHTTPFilter(patterns []string) *HTTPFilter {
@@ -37,7 +38,9 @@ func NewHTTPFilter(patterns []string) *HTTPFilter {
 	for _, pattern := range patterns {
 		filters = append(filters, parseHTTPFilter(pattern))
 	}
-	return &HTTPFilter{filters: filters}
+	f := &HTTPFilter{filters: filters}
+	f.inner = NewMapAnalyzer("http_filter", f.processEvent)
+	return f
 }
 
 func (f *HTTPFilter) Name() string {
@@ -45,35 +48,22 @@ func (f *HTTPFilter) Name() string {
 }
 
 func (f *HTTPFilter) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
-	out := make(chan *event.Event)
+	return f.inner.Process(ctx, in)
+}
 
-	go func() {
-		defer close(out)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case event, ok := <-in:
-				if !ok {
-					return
-				}
-				if event.Source == "http_parser" {
-					f.total.Add(1)
-					globalHTTPFilterTotal.Add(1)
-					if f.shouldFilter(event.Data) {
-						f.filtered.Add(1)
-						globalHTTPFilterFiltered.Add(1)
-						continue
-					}
-					f.passed.Add(1)
-					globalHTTPFilterPassed.Add(1)
-				}
-				out <- event
-			}
+func (f *HTTPFilter) processEvent(ev *event.Event) []*event.Event {
+	if ev.Source == "http_parser" {
+		f.total.Add(1)
+		globalHTTPFilterTotal.Add(1)
+		if f.shouldFilter(ev.Data) {
+			f.filtered.Add(1)
+			globalHTTPFilterFiltered.Add(1)
+			return nil
 		}
-	}()
-
-	return out
+		f.passed.Add(1)
+		globalHTTPFilterPassed.Add(1)
+	}
+	return []*event.Event{ev}
 }
 
 type httpFilterExpression struct {
@@ -123,15 +113,45 @@ func parseHTTPAnd(expr string) httpFilterNode {
 	return parseHTTPCondition(expr)
 }
 
+// httpFieldOperatorMap maps field name aliases to their operator.
+var httpFieldOperatorMap = map[string]string{
+	"path_prefix":      "prefix",
+	"path_starts_with": "prefix",
+	"path_contains":    "contains",
+	"path_includes":    "contains",
+	"path":             "exact",
+	"path_exact":       "exact",
+}
+
+// httpTargetAliases normalizes target prefixes to canonical names.
+var httpTargetAliases = map[string]string{
+	"request":  "request",
+	"req":      "request",
+	"response": "response",
+	"resp":     "response",
+	"res":      "response",
+}
+
+func resolveHTTPFieldOperator(field string) string {
+	if op, ok := httpFieldOperatorMap[field]; ok {
+		return op
+	}
+	return "exact"
+}
+
+func resolveHTTPTarget(raw string) string {
+	if t, ok := httpTargetAliases[raw]; ok {
+		return t
+	}
+	return "request"
+}
+
 func parseHTTPCondition(expr string) httpFilterNode {
 	expr = strings.TrimSpace(expr)
 	if !strings.Contains(expr, "=") {
 		return httpFilterNode{
-			op:       "cond",
-			target:   "request",
-			field:    "path",
-			operator: "contains",
-			value:    expr,
+			op: "cond", target: "request", field: "path",
+			operator: "contains", value: expr,
 		}
 	}
 
@@ -145,51 +165,21 @@ func parseHTTPCondition(expr string) httpFilterNode {
 
 	if strings.Contains(key, ".") {
 		keyParts := strings.SplitN(key, ".", 2)
-		target := strings.TrimSpace(keyParts[0])
+		target := resolveHTTPTarget(strings.TrimSpace(keyParts[0]))
 		field := strings.TrimSpace(keyParts[1])
-
 		op := "exact"
-		if target == "request" || target == "req" {
-			switch field {
-			case "path_prefix", "path_starts_with":
-				op = "prefix"
-			case "path_contains", "path_includes":
-				op = "contains"
-			case "path", "path_exact":
-				op = "exact"
-			}
-			target = "request"
-		} else if target == "response" || target == "resp" || target == "res" {
-			target = "response"
-		} else {
-			target = "request"
+		if target == "request" {
+			op = resolveHTTPFieldOperator(field)
 		}
-
 		return httpFilterNode{
-			op:       "cond",
-			target:   target,
-			field:    field,
-			operator: op,
-			value:    value,
+			op: "cond", target: target, field: field,
+			operator: op, value: value,
 		}
-	}
-
-	op := "exact"
-	switch key {
-	case "path_prefix", "path_starts_with":
-		op = "prefix"
-	case "path_contains", "path_includes":
-		op = "contains"
-	case "path", "path_exact":
-		op = "exact"
 	}
 
 	return httpFilterNode{
-		op:       "cond",
-		target:   "request",
-		field:    key,
-		operator: op,
-		value:    value,
+		op: "cond", target: "request", field: key,
+		operator: resolveHTTPFieldOperator(key), value: value,
 	}
 }
 

@@ -40,6 +40,7 @@ type ToolCallAggregator struct {
 	mu         sync.Mutex
 	live       map[toolCallKey]*toolCallState
 	extractors map[string]toolCallExtractor
+	inner      *statefulAnalyzer
 }
 
 func NewToolCallAggregator() *ToolCallAggregator {
@@ -53,6 +54,28 @@ func NewToolCallAggregator() *ToolCallAggregator {
 	}
 	t.extractors["process"] = &processToolCallExtractor{}
 	t.extractors["http_parser"] = &httpToolCallExtractor{}
+	t.inner = NewStatefulAnalyzer("tool_call_aggregator", StatefulOpts{
+		TickInterval: t.cfg.idleGap,
+		OnEvent: func(ev *event.Event, emit func(*event.Event)) {
+			extractor, ok := t.extractors[ev.Source]
+			if !ok {
+				emit(ev)
+				return
+			}
+			extractions := extractor.Extract(ev.Data)
+			if len(extractions) == 0 {
+				emit(ev)
+				return
+			}
+			t.handleExtractions(ev, extractions, emit)
+		},
+		OnTick: func(emit func(*event.Event)) {
+			t.flushExpired(emit, time.Now())
+		},
+		OnClose: func(emit func(*event.Event)) {
+			t.flushAll(emit)
+		},
+	})
 	return t
 }
 
@@ -61,53 +84,19 @@ func (t *ToolCallAggregator) Name() string {
 }
 
 func (t *ToolCallAggregator) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
-	out := make(chan *event.Event)
-
-	go func() {
-		defer close(out)
-		ticker := time.NewTicker(t.cfg.idleGap)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				t.flushAll(out)
-				return
-			case <-ticker.C:
-				t.flushExpired(out, time.Now())
-			case event, ok := <-in:
-				if !ok {
-					t.flushAll(out)
-					return
-				}
-				extractor, ok := t.extractors[event.Source]
-				if !ok {
-					out <- event
-					continue
-				}
-				extractions := extractor.Extract(event.Data)
-				if len(extractions) == 0 {
-					out <- event
-					continue
-				}
-				t.handleExtractions(event, extractions, out)
-			}
-		}
-	}()
-
-	return out
+	return t.inner.Process(ctx, in)
 }
 
-func (t *ToolCallAggregator) flushAll(out chan<- *event.Event) {
+func (t *ToolCallAggregator) flushAll(emit func(*event.Event)) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for _, state := range t.live {
-		out <- t.finishState(state, "timeout", "flush")
+		emit(t.finishState(state, "timeout", "flush"))
 	}
 	t.live = make(map[toolCallKey]*toolCallState)
 }
 
-func (t *ToolCallAggregator) flushExpired(out chan<- *event.Event, now time.Time) {
+func (t *ToolCallAggregator) flushExpired(emit func(*event.Event), now time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -115,23 +104,23 @@ func (t *ToolCallAggregator) flushExpired(out chan<- *event.Event, now time.Time
 	for key, state := range t.live {
 		last := event.BootNsToTime(state.lastNs)
 		if last.Before(cutoff) {
-			out <- t.finishState(state, "timeout", "idle_gap")
+			emit(t.finishState(state, "timeout", "idle_gap"))
 			delete(t.live, key)
 		}
 	}
 }
 
-func (t *ToolCallAggregator) handleExtractions(event *event.Event, extractions []toolCallExtraction, out chan<- *event.Event) {
+func (t *ToolCallAggregator) handleExtractions(ev *event.Event, extractions []toolCallExtraction, emit func(*event.Event)) {
 	for _, ex := range extractions {
-		state, isNew, rolled := t.startOrUpdate(event, ex.toolName, ex.keyField, ex.argsSummary, ex.bytes)
+		state, isNew, rolled := t.startOrUpdate(ev, ex.toolName, ex.keyField, ex.argsSummary, ex.bytes)
 		if rolled != nil {
-			out <- rolled
+			emit(rolled)
 		}
 		if isNew {
-			out <- t.startEvent(event, state)
+			emit(t.startEvent(ev, state))
 		}
 		if ex.immediate {
-			out <- t.finishState(state, "success", "exec")
+			emit(t.finishState(state, "success", "exec"))
 			t.removeState(state.key)
 		}
 	}

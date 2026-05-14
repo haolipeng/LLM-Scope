@@ -174,41 +174,49 @@ func parseSSEEvents(data string) []sseEvent {
 	return parseSSEEventsFromChunk(clean)
 }
 
+// parseSSEBlock 解析单个 SSE 块为 sseEvent，返回 false 表示该块无有效内容
+func parseSSEBlock(block string) (sseEvent, bool) {
+	if strings.TrimSpace(block) == "" {
+		return sseEvent{}, false
+	}
+
+	ev := sseEvent{}
+	var dataLines []string
+	for _, line := range strings.Split(block, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "event:"):
+			ev.Event = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		case strings.HasPrefix(line, "data:"):
+			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		case strings.HasPrefix(line, "id:"):
+			ev.ID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
+		}
+	}
+
+	if len(dataLines) > 0 {
+		combined := strings.Join(dataLines, "\n")
+		ev.Data = combined
+		var parsed map[string]interface{}
+		if err := json.Unmarshal([]byte(combined), &parsed); err == nil {
+			ev.ParsedData = parsed
+		} else {
+			ev.RawData = combined
+		}
+	}
+
+	if ev.Event == "" && ev.Data == "" {
+		return sseEvent{}, false
+	}
+	return ev, true
+}
+
 func parseSSEEventsFromChunk(chunk string) []sseEvent {
 	blocks := strings.Split(chunk, "\n\n")
 	events := make([]sseEvent, 0, len(blocks))
 	for _, block := range blocks {
-		if strings.TrimSpace(block) == "" {
-			continue
-		}
-
-		event := sseEvent{}
-		var dataLines []string
-		for _, line := range strings.Split(block, "\n") {
-			line = strings.TrimSpace(line)
-			switch {
-			case strings.HasPrefix(line, "event:"):
-				event.Event = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-			case strings.HasPrefix(line, "data:"):
-				dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
-			case strings.HasPrefix(line, "id:"):
-				event.ID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
-			}
-		}
-
-		if len(dataLines) > 0 {
-			combined := strings.Join(dataLines, "\n")
-			event.Data = combined
-			var parsed map[string]interface{}
-			if err := json.Unmarshal([]byte(combined), &parsed); err == nil {
-				event.ParsedData = parsed
-			} else {
-				event.RawData = combined
-			}
-		}
-
-		if event.Event != "" || event.Data != "" {
-			events = append(events, event)
+		if ev, ok := parseSSEBlock(block); ok {
+			events = append(events, ev)
 		}
 	}
 	return events

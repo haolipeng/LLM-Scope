@@ -13,10 +13,11 @@ import (
 type AuthRemover struct {
 	headers []string
 	debug   bool
+	inner   *mapAnalyzer
 }
 
 func NewAuthRemover() *AuthRemover {
-	return &AuthRemover{
+	a := &AuthRemover{
 		headers: []string{
 			"authorization",
 			"x-api-key",
@@ -29,11 +30,14 @@ func NewAuthRemover() *AuthRemover {
 			"set-cookie",
 		},
 	}
+	a.inner = NewMapAnalyzer("auth_remover", a.processEvent)
+	return a
 }
 
 func NewAuthRemoverWithDebug(debug bool) *AuthRemover {
 	a := NewAuthRemover()
 	a.debug = debug
+	a.inner = NewMapAnalyzer("auth_remover", a.processEvent)
 	return a
 }
 
@@ -42,27 +46,14 @@ func (a *AuthRemover) Name() string {
 }
 
 func (a *AuthRemover) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
-	out := make(chan *event.Event)
+	return a.inner.Process(ctx, in)
+}
 
-	go func() {
-		defer close(out)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case event, ok := <-in:
-				if !ok {
-					return
-				}
-				if event.Source == "http_parser" {
-					event.Data = a.stripHeaders(event.Data)
-				}
-				out <- event
-			}
-		}
-	}()
-
-	return out
+func (a *AuthRemover) processEvent(ev *event.Event) []*event.Event {
+	if ev.Source == "http_parser" {
+		ev.Data = a.stripHeaders(ev.Data)
+	}
+	return []*event.Event{ev}
 }
 
 func (a *AuthRemover) stripHeaders(raw json.RawMessage) json.RawMessage {

@@ -52,27 +52,27 @@ func (t *PIDTracker) IsTracked(pid int32) bool {
 }
 
 func (t *PIDTracker) ShouldTrackProcess(comm string, pid, ppid int32) bool {
-	switch t.filterMode {
-	case FilterModeAll, FilterModeProc:
+	if t.filterMode == FilterModeAll || t.filterMode == FilterModeProc {
 		return true
-	case FilterModeFilter:
-		if t.targetPID > 0 && pid == t.targetPID {
-			return true
-		}
-		t.mu.RLock()
-		_, parentTracked := t.tracked[ppid]
-		t.mu.RUnlock()
-		if parentTracked {
-			return true
-		}
-		if len(t.commandFilters) > 0 {
-			for _, filter := range t.commandFilters {
-				if comm == filter {
-					return true
-				}
-			}
-		}
+	}
+	if t.filterMode != FilterModeFilter {
 		return false
+	}
+
+	// FilterModeFilter: match by target PID, parent tracking, or command filter.
+	if t.targetPID > 0 && pid == t.targetPID {
+		return true
+	}
+	t.mu.RLock()
+	_, parentTracked := t.tracked[ppid]
+	t.mu.RUnlock()
+	if parentTracked {
+		return true
+	}
+	for _, filter := range t.commandFilters {
+		if comm == filter {
+			return true
+		}
 	}
 	return false
 }

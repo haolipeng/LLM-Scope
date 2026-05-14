@@ -58,34 +58,36 @@ func (e *processToolCallExtractor) extractExec(payload map[string]interface{}) [
 	}}
 }
 
-func isNoiseFilePath(filepath string) bool {
-	if strings.HasPrefix(filepath, "/proc/") {
-		return true
+// Noise file path rules — declarative tables for easy extension.
+var (
+	noisePrefixes = []string{
+		"/proc/", "/sys/", "/dev/",
+		"/usr/lib/", "/lib/", "/usr/share/",
 	}
-	if strings.HasPrefix(filepath, "/sys/") || strings.HasPrefix(filepath, "/dev/") {
-		return true
+	noiseSuffixes  = []string{".so", ".lock", ".pid"}
+	noiseContains  = []string{".so.", ".cursor-server/", "/node_modules/", "/.git/objects/"}
+)
+
+func isNoiseFilePath(path string) bool {
+	for _, p := range noisePrefixes {
+		if strings.HasPrefix(path, p) {
+			return true
+		}
 	}
-	if strings.HasPrefix(filepath, "/usr/lib/") ||
-		strings.HasPrefix(filepath, "/lib/") ||
-		strings.HasPrefix(filepath, "/usr/share/") {
-		return true
+	if strings.HasPrefix(path, "/etc/") {
+		return path == "/etc/ld.so.cache" || strings.HasPrefix(path, "/etc/ld.so")
 	}
-	if strings.HasPrefix(filepath, "/etc/") {
-		return filepath == "/etc/ld.so.cache" || strings.HasPrefix(filepath, "/etc/ld.so")
+	for _, s := range noiseSuffixes {
+		if strings.HasSuffix(path, s) {
+			return true
+		}
 	}
-	if strings.HasSuffix(filepath, ".so") || strings.Contains(filepath, ".so.") {
-		return true
+	for _, c := range noiseContains {
+		if strings.Contains(path, c) {
+			return true
+		}
 	}
-	if strings.Contains(filepath, ".cursor-server/") {
-		return true
-	}
-	if strings.Contains(filepath, "/node_modules/") {
-		return true
-	}
-	if strings.HasPrefix(filepath, ".git/objects/") || strings.Contains(filepath, "/.git/objects/") {
-		return true
-	}
-	if strings.HasSuffix(filepath, ".lock") || strings.HasSuffix(filepath, ".pid") {
+	if strings.HasPrefix(path, ".git/objects/") {
 		return true
 	}
 	return false

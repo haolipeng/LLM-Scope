@@ -2,6 +2,7 @@ package sink
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -341,38 +342,12 @@ func parseStreamSeqField(m map[string]interface{}, key string) (uint64, bool) {
 	if !ok || v == nil {
 		return 0, false
 	}
-	switch val := v.(type) {
-	case string:
-		if val == "" {
-			return 0, false
-		}
-		u, err := strconv.ParseUint(strings.TrimSpace(val), 10, 64)
-		if err != nil {
-			return 0, false
-		}
-		return u, true
-	case float64:
-		if val < 0 || val > float64(^uint64(0)) {
-			return 0, false
-		}
-		return uint64(val), true
-	case json.Number:
-		u, err := strconv.ParseUint(string(val), 10, 64)
-		if err != nil {
-			return 0, false
-		}
-		return u, true
-	default:
-		s := strings.TrimSpace(jsonStr(v))
-		if s == "" {
-			return 0, false
-		}
-		u, err := strconv.ParseUint(s, 10, 64)
-		if err != nil {
-			return 0, false
-		}
-		return u, true
+	s := strings.TrimSpace(fmt.Sprint(v))
+	if s == "" {
+		return 0, false
 	}
+	u, err := strconv.ParseUint(s, 10, 64)
+	return u, err == nil
 }
 
 // ---------- JSON field helpers ----------

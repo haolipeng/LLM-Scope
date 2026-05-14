@@ -155,6 +155,19 @@ func (b *BaseRunner) AttachUretprobe(exe *link.Executable, symbol string, prog *
 	b.Links = append(b.Links, l)
 }
 
+func writeASCIIByte(sb *strings.Builder, b byte) {
+	if b >= asciiPrintMin && b <= asciiPrintMax {
+		sb.WriteByte(b)
+		return
+	}
+	switch b {
+	case '\n', '\r', '\t':
+		sb.WriteByte(b)
+	default:
+		fmt.Fprintf(sb, "\\u%04x", b)
+	}
+}
+
 // SanitizeBufferData 从原始缓冲区数据生成适合 JSON 的字符串，
 // 处理 UTF-8 校验以及控制字符转义。
 // CR/LF/TAB 会按字节原样保留（`json.Marshal` 在把字符串序列化为 JSON 时会处理编码）。
@@ -165,20 +178,7 @@ func SanitizeBufferData(buf []byte) string {
 	for i := 0; i < len(buf); {
 		b := buf[i]
 		if b < asciiByteLimit {
-			if b >= asciiPrintMin && b <= asciiPrintMax {
-				sb.WriteByte(b)
-			} else {
-				switch b {
-				case '\n':
-					sb.WriteByte('\n')
-				case '\r':
-					sb.WriteByte('\r')
-				case '\t':
-					sb.WriteByte('\t')
-				default:
-					fmt.Fprintf(&sb, "\\u%04x", b)
-				}
-			}
+			writeASCIIByte(&sb, b)
 			i++
 		} else {
 			r, size := utf8.DecodeRune(buf[i:])

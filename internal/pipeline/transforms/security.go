@@ -41,11 +41,12 @@ type Evidence struct {
 // separate security alert event is injected into the output stream.
 type SecurityAnalyzer struct {
 	rules []SecurityRule
+	inner *statefulAnalyzer
 }
 
 // NewSecurityAnalyzer creates a SecurityAnalyzer with the built-in rule set.
 func NewSecurityAnalyzer() *SecurityAnalyzer {
-	return &SecurityAnalyzer{
+	s := &SecurityAnalyzer{
 		rules: []SecurityRule{
 			&SensitiveFileRule{},
 			&DangerousCommandRule{},
@@ -53,11 +54,47 @@ func NewSecurityAnalyzer() *SecurityAnalyzer {
 			&SuspiciousNetworkRule{},
 		},
 	}
+	s.initInner()
+	return s
 }
 
 // NewSecurityAnalyzerWithRules creates a SecurityAnalyzer with custom rules.
 func NewSecurityAnalyzerWithRules(rules []SecurityRule) *SecurityAnalyzer {
-	return &SecurityAnalyzer{rules: rules}
+	s := &SecurityAnalyzer{rules: rules}
+	s.initInner()
+	return s
+}
+
+func (s *SecurityAnalyzer) initInner() {
+	s.inner = NewStatefulAnalyzer("security_analyzer", StatefulOpts{
+		BufSize: 100,
+		OnEvent: func(ev *event.Event, emit func(*event.Event)) {
+			// Assign stream sequence before forwarding so security alerts can reference this row id after DuckDB insert.
+			if ev.StreamSeq == 0 {
+				ev.StreamSeq = event.NextStreamSeq()
+			}
+			// Always forward the original event.
+			emit(ev)
+
+			// Skip events that are already security alerts.
+			if ev.Source == "security" {
+				return
+			}
+
+			// Parse data once for all rules.
+			var data map[string]interface{}
+			if err := json.Unmarshal(ev.Data, &data); err != nil {
+				return
+			}
+
+			// Check each rule.
+			for _, rule := range s.rules {
+				if alert := rule.Check(ev, data); alert != nil {
+					emit(buildSecurityEvent(ev, alert))
+				}
+			}
+		},
+	})
 }
 
 func (s *SecurityAnalyzer) Name() string { return "security_analyzer" }
@@ -65,47 +102,7 @@ func (s *SecurityAnalyzer) Name() string { return "security_analyzer" }
 // Process passes every event through, and injects extra security alert events
 // for each rule that fires.
 func (s *SecurityAnalyzer) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
-	out := make(chan *event.Event, 100)
-
-	go func() {
-		defer close(out)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case ev, ok := <-in:
-				if !ok {
-					return
-				}
-				// Assign stream sequence before forwarding so security alerts can reference this row id after DuckDB insert.
-				if ev.StreamSeq == 0 {
-					ev.StreamSeq = event.NextStreamSeq()
-				}
-				// Always forward the original event.
-				out <- ev
-
-				// Skip events that are already security alerts.
-				if ev.Source == "security" {
-					continue
-				}
-
-				// Parse data once for all rules.
-				var data map[string]interface{}
-				if err := json.Unmarshal(ev.Data, &data); err != nil {
-					continue
-				}
-
-				// Check each rule.
-				for _, rule := range s.rules {
-					if alert := rule.Check(ev, data); alert != nil {
-						out <- buildSecurityEvent(ev, alert)
-					}
-				}
-			}
-		}
-	}()
-
-	return out
+	return s.inner.Process(ctx, in)
 }
 
 // buildSecurityEvent creates a new Event with source="security" from an alert.

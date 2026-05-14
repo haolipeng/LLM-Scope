@@ -11,10 +11,13 @@ import (
 // HTTPParser parses SSL events into HTTP request/response events.
 type HTTPParser struct {
 	includeRaw bool
+	inner      *mapAnalyzer
 }
 
 func NewHTTPParser(includeRaw bool) *HTTPParser {
-	return &HTTPParser{includeRaw: includeRaw}
+	p := &HTTPParser{includeRaw: includeRaw}
+	p.inner = NewMapAnalyzer("http_parser", p.processEvent)
+	return p
 }
 
 func (p *HTTPParser) Name() string {
@@ -22,34 +25,18 @@ func (p *HTTPParser) Name() string {
 }
 
 func (p *HTTPParser) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
-	out := make(chan *event.Event)
+	return p.inner.Process(ctx, in)
+}
 
-	go func() {
-		defer close(out)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case event, ok := <-in:
-				if !ok {
-					return
-				}
-				if event.Source != "ssl" {
-					out <- event
-					continue
-				}
-
-				parsed := p.parseEvent(event)
-				if parsed != nil {
-					out <- parsed
-				} else {
-					out <- event
-				}
-			}
-		}
-	}()
-
-	return out
+func (p *HTTPParser) processEvent(ev *event.Event) []*event.Event {
+	if ev.Source != "ssl" {
+		return []*event.Event{ev}
+	}
+	parsed := p.parseEvent(ev)
+	if parsed != nil {
+		return []*event.Event{parsed}
+	}
+	return []*event.Event{ev}
 }
 
 func (p *HTTPParser) parseEvent(event *event.Event) *event.Event {
@@ -76,19 +63,22 @@ func (p *HTTPParser) parseEvent(event *event.Event) *event.Event {
 	return buildHTTPEvent(parsed, tid, event, p.includeRaw)
 }
 
+var httpRequestMethods = []string{"GET ", "POST ", "PUT ", "DELETE ", "HEAD ", "OPTIONS ", "PATCH "}
+var httpCommonHeaders = []string{"Content-Type:", "content-type:", "Host:", "host:", "User-Agent:", "user-agent:"}
+
+func containsAny(s string, patterns []string) bool {
+	for _, p := range patterns {
+		if strings.Contains(s, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func isHTTPData(data string) bool {
-	hasRequest := strings.Contains(data, "HTTP/1.") &&
-		(strings.Contains(data, "GET ") || strings.Contains(data, "POST ") ||
-			strings.Contains(data, "PUT ") || strings.Contains(data, "DELETE ") ||
-			strings.Contains(data, "HEAD ") || strings.Contains(data, "OPTIONS ") ||
-			strings.Contains(data, "PATCH "))
-
+	hasRequest := strings.Contains(data, "HTTP/1.") && containsAny(data, httpRequestMethods)
 	hasResponse := strings.HasPrefix(data, "HTTP/1.") || strings.Contains(data, "\r\nHTTP/1.")
-
-	hasHeaders := strings.Contains(data, "Content-Type:") || strings.Contains(data, "content-type:") ||
-		strings.Contains(data, "Host:") || strings.Contains(data, "host:") ||
-		strings.Contains(data, "User-Agent:") || strings.Contains(data, "user-agent:")
-
+	hasHeaders := containsAny(data, httpCommonHeaders)
 	return hasRequest || hasResponse || hasHeaders
 }
 
@@ -105,6 +95,54 @@ type httpMessage struct {
 	statusText  *string
 }
 
+type firstLineResult struct {
+	msgType    string
+	method     *string
+	path       *string
+	protocol   *string
+	statusCode *uint16
+	statusText *string
+}
+
+func parseFirstLine(line string) firstLineResult {
+	if strings.HasPrefix(line, "HTTP/") {
+		return parseResponseLine(line)
+	}
+	return parseRequestLine(line)
+}
+
+func parseResponseLine(line string) firstLineResult {
+	r := firstLineResult{msgType: "response"}
+	parts := strings.SplitN(line, " ", 3)
+	if len(parts) >= 2 {
+		if code, err := parseUint(parts[1]); err == nil {
+			c := uint16(code)
+			r.statusCode = &c
+		}
+		if len(parts) >= 3 {
+			st := parts[2]
+			r.statusText = &st
+		}
+		proto := parts[0]
+		r.protocol = &proto
+	}
+	return r
+}
+
+func parseRequestLine(line string) firstLineResult {
+	r := firstLineResult{msgType: "request"}
+	parts := strings.SplitN(line, " ", 3)
+	if len(parts) >= 3 {
+		m := parts[0]
+		r.method = &m
+		p := parts[1]
+		r.path = &p
+		proto := parts[2]
+		r.protocol = &proto
+	}
+	return r
+}
+
 func parseHTTPMessage(data string) *httpMessage {
 	lines := strings.Split(data, "\r\n")
 	if len(lines) == 0 {
@@ -115,37 +153,7 @@ func parseHTTPMessage(data string) *httpMessage {
 	headers := map[string]string{}
 	bodyStart := -1
 
-	msgType := "request"
-	var method, path, protocol *string
-	var statusCode *uint16
-	var statusText *string
-
-	if strings.HasPrefix(firstLine, "HTTP/") {
-		msgType = "response"
-		parts := strings.SplitN(firstLine, " ", 3)
-		if len(parts) >= 2 {
-			if code, err := parseUint(parts[1]); err == nil {
-				c := uint16(code)
-				statusCode = &c
-			}
-			if len(parts) >= 3 {
-				st := parts[2]
-				statusText = &st
-			}
-			proto := parts[0]
-			protocol = &proto
-		}
-	} else {
-		parts := strings.SplitN(firstLine, " ", 3)
-		if len(parts) >= 3 {
-			m := parts[0]
-			method = &m
-			p := parts[1]
-			path = &p
-			proto := parts[2]
-			protocol = &proto
-		}
-	}
+	fl := parseFirstLine(firstLine)
 
 	for i := 1; i < len(lines); i++ {
 		line := lines[i]
@@ -169,16 +177,16 @@ func parseHTTPMessage(data string) *httpMessage {
 	}
 
 	return &httpMessage{
-		messageType: msgType,
+		messageType: fl.msgType,
 		firstLine:   firstLine,
 		headers:     headers,
 		body:        body,
 		rawData:     data,
-		method:      method,
-		path:        path,
-		protocol:    protocol,
-		statusCode:  statusCode,
-		statusText:  statusText,
+		method:      fl.method,
+		path:        fl.path,
+		protocol:    fl.protocol,
+		statusCode:  fl.statusCode,
+		statusText:  fl.statusText,
 	}
 }
 

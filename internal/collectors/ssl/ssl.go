@@ -11,7 +11,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
 
-	bpfssl "github.com/haolipeng/LLM-Scope/internal/bpf/sslsniff"
+	bpf "github.com/haolipeng/LLM-Scope/internal/bpf/agentsight"
 	runtimebase "github.com/haolipeng/LLM-Scope/internal/collectors/base"
 	"github.com/haolipeng/LLM-Scope/internal/event"
 	"github.com/haolipeng/LLM-Scope/internal/logging"
@@ -52,7 +52,7 @@ type Config struct {
 type Runner struct {
 	runtimebase.BaseRunner
 	config Config
-	objs   bpfssl.Objects
+	objs   bpf.Objects
 }
 
 func New(config Config) *Runner {
@@ -72,14 +72,14 @@ func (r *Runner) Run(ctx context.Context) (<-chan *event.Event, error) {
 		logging.Named("ssl").Warnf("remove memlock: %v", err)
 	}
 
-	spec, err := bpfssl.LoadSpec()
+	spec, err := bpf.LoadSpec()
 	if err != nil {
 		return nil, fmt.Errorf("load BPF spec: %w", err)
 	}
 
 	if r.config.PID > 0 {
-		if err := spec.Variables["targ_pid"].Set(int32(r.config.PID)); err != nil {
-			return nil, fmt.Errorf("set targ_pid: %w", err)
+		if err := spec.Variables["ssl_targ_pid"].Set(int32(r.config.PID)); err != nil {
+			return nil, fmt.Errorf("set ssl_targ_pid: %w", err)
 		}
 	}
 	if r.config.UID >= 0 {
@@ -87,8 +87,8 @@ func (r *Runner) Run(ctx context.Context) (<-chan *event.Event, error) {
 		if r.config.UID > 0 {
 			uid = uint32(r.config.UID)
 		}
-		if err := spec.Variables["targ_uid"].Set(uid); err != nil {
-			return nil, fmt.Errorf("set targ_uid: %w", err)
+		if err := spec.Variables["ssl_targ_uid"].Set(uid); err != nil {
+			return nil, fmt.Errorf("set ssl_targ_uid: %w", err)
 		}
 	}
 
@@ -102,7 +102,7 @@ func (r *Runner) Run(ctx context.Context) (<-chan *event.Event, error) {
 		return nil, fmt.Errorf("attach uprobes: %w", err)
 	}
 
-	if err := r.InitRingBuffer(r.objs.Rb); err != nil {
+	if err := r.InitRingBuffer(r.objs.RbSsl); err != nil {
 		r.CloseLinks()
 		r.objs.Close()
 		return nil, err

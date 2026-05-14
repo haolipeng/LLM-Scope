@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/rlimit"
 
-	bpfstdio "github.com/haolipeng/LLM-Scope/internal/bpf/stdiocap"
+	bpf "github.com/haolipeng/LLM-Scope/internal/bpf/agentsight"
 	runtimebase "github.com/haolipeng/LLM-Scope/internal/collectors/base"
 	"github.com/haolipeng/LLM-Scope/internal/event"
 	"github.com/haolipeng/LLM-Scope/internal/logging"
@@ -46,7 +47,7 @@ type Config struct {
 type Runner struct {
 	runtimebase.BaseRunner
 	config Config
-	objs   bpfstdio.Objects
+	objs   bpf.Objects
 }
 
 func New(config Config) *Runner {
@@ -61,35 +62,41 @@ func New(config Config) *Runner {
 func (r *Runner) ID() string   { return "stdio" }
 func (r *Runner) Name() string { return "stdio" }
 
+// setBPFVariables 根据配置设置 BPF 全局变量
+func (r *Runner) setBPFVariables(spec *ebpf.CollectionSpec) error {
+	type bpfVar struct {
+		name  string
+		value interface{}
+		cond  bool
+	}
+	vars := []bpfVar{
+		{"stdio_targ_pid", uint32(r.config.PID), r.config.PID > 0},
+		{"stdio_targ_uid", uint32(r.config.UID), r.config.UID > 0},
+		{"trace_stdio_only", false, r.config.AllFDs},
+		{"max_capture_bytes", uint32(r.config.MaxBytes), r.config.MaxBytes > 0 && r.config.MaxBytes < stdioMaxBufSize},
+	}
+	for _, v := range vars {
+		if v.cond {
+			if err := spec.Variables[v.name].Set(v.value); err != nil {
+				return fmt.Errorf("set %s: %w", v.name, err)
+			}
+		}
+	}
+	return nil
+}
+
 func (r *Runner) Run(ctx context.Context) (<-chan *event.Event, error) {
 	if err := rlimit.RemoveMemlock(); err != nil {
 		logging.Named("stdio").Warnf("remove memlock: %v", err)
 	}
 
-	spec, err := bpfstdio.LoadSpec()
+	spec, err := bpf.LoadSpec()
 	if err != nil {
 		return nil, fmt.Errorf("load BPF spec: %w", err)
 	}
 
-	if r.config.PID > 0 {
-		if err := spec.Variables["targ_pid"].Set(uint32(r.config.PID)); err != nil {
-			return nil, fmt.Errorf("set targ_pid: %w", err)
-		}
-	}
-	if r.config.UID > 0 {
-		if err := spec.Variables["targ_uid"].Set(uint32(r.config.UID)); err != nil {
-			return nil, fmt.Errorf("set targ_uid: %w", err)
-		}
-	}
-	if r.config.AllFDs {
-		if err := spec.Variables["trace_stdio_only"].Set(false); err != nil {
-			return nil, fmt.Errorf("set trace_stdio_only: %w", err)
-		}
-	}
-	if r.config.MaxBytes > 0 && r.config.MaxBytes < stdioMaxBufSize {
-		if err := spec.Variables["max_capture_bytes"].Set(uint32(r.config.MaxBytes)); err != nil {
-			return nil, fmt.Errorf("set max_capture_bytes: %w", err)
-		}
+	if err := r.setBPFVariables(spec); err != nil {
+		return nil, err
 	}
 
 	if err := spec.LoadAndAssign(&r.objs, nil); err != nil {
@@ -107,7 +114,7 @@ func (r *Runner) Run(ctx context.Context) (<-chan *event.Event, error) {
 		return nil, fmt.Errorf("no tracepoints attached")
 	}
 
-	if err := r.InitRingBuffer(r.objs.Rb); err != nil {
+	if err := r.InitRingBuffer(r.objs.RbStdio); err != nil {
 		r.CloseLinks()
 		r.objs.Close()
 		return nil, err

@@ -24,6 +24,7 @@ type ClaudeToolCallAnalyzer struct {
 	pending  map[string]*pendingToolCall // keyed by tool_use_id
 	timeout  time.Duration
 	agentPID uint32 // track the main agent PID for process event correlation
+	inner    *statefulAnalyzer
 }
 
 type pendingToolCall struct {
@@ -51,66 +52,66 @@ type ClaudeToolCallConfig struct {
 
 // NewClaudeToolCallAnalyzer creates an analyzer with default settings.
 func NewClaudeToolCallAnalyzer() *ClaudeToolCallAnalyzer {
-	return &ClaudeToolCallAnalyzer{
-		pending: make(map[string]*pendingToolCall),
-		timeout: 30 * time.Second,
-	}
+	c := newClaudeToolCallBase(30 * time.Second)
+	c.initInner()
+	return c
 }
 
 // NewClaudeToolCallAnalyzerWithConfig creates an analyzer with custom config.
 func NewClaudeToolCallAnalyzerWithConfig(cfg ClaudeToolCallConfig) *ClaudeToolCallAnalyzer {
-	t := NewClaudeToolCallAnalyzer()
+	timeout := 30 * time.Second
 	if cfg.Timeout > 0 {
-		t.timeout = cfg.Timeout
+		timeout = cfg.Timeout
 	}
-	return t
+	c := newClaudeToolCallBase(timeout)
+	c.initInner()
+	return c
+}
+
+func newClaudeToolCallBase(timeout time.Duration) *ClaudeToolCallAnalyzer {
+	return &ClaudeToolCallAnalyzer{
+		pending: make(map[string]*pendingToolCall),
+		timeout: timeout,
+	}
+}
+
+func (c *ClaudeToolCallAnalyzer) initInner() {
+	c.inner = NewStatefulAnalyzer("claude_tool_call_analyzer", StatefulOpts{
+		BufSize:      100,
+		TickInterval: 5 * time.Second,
+		OnEvent: func(ev *event.Event, emit func(*event.Event)) {
+			c.handleEvent(ev, emit)
+		},
+		OnTick: func(emit func(*event.Event)) {
+			c.flushExpired(emit)
+		},
+		OnClose: func(emit func(*event.Event)) {
+			c.flushAll(emit, "context_cancelled")
+		},
+	})
 }
 
 func (c *ClaudeToolCallAnalyzer) Name() string { return "claude_tool_call_analyzer" }
 
 func (c *ClaudeToolCallAnalyzer) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
-	out := make(chan *event.Event, 100)
-
-	go func() {
-		defer close(out)
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				c.flushAll(out, "context_cancelled")
-				return
-			case <-ticker.C:
-				c.flushExpired(out)
-			case event, ok := <-in:
-				if !ok {
-					c.flushAll(out, "channel_closed")
-					return
-				}
-				c.handleEvent(event, out)
-			}
-		}
-	}()
-
-	return out
+	return c.inner.Process(ctx, in)
 }
 
-func (c *ClaudeToolCallAnalyzer) handleEvent(event *event.Event, out chan<- *event.Event) {
+func (c *ClaudeToolCallAnalyzer) handleEvent(event *event.Event, emit func(*event.Event)) {
 	switch event.Source {
 	case "http_parser":
-		c.handleHTTP(event, out)
+		c.handleHTTP(event, emit)
 	case "process":
-		c.handleProcess(event, out)
+		c.handleProcess(event, emit)
 	default:
 		// Pass through all other events.
-		out <- event
+		emit(event)
 	}
 }
 
-func (c *ClaudeToolCallAnalyzer) handleHTTP(event *event.Event, out chan<- *event.Event) {
+func (c *ClaudeToolCallAnalyzer) handleHTTP(event *event.Event, emit func(*event.Event)) {
 	// Always forward the original HTTP event.
-	out <- event
+	emit(event)
 
 	var data map[string]interface{}
 	if err := json.Unmarshal(event.Data, &data); err != nil {
@@ -125,7 +126,7 @@ func (c *ClaudeToolCallAnalyzer) handleHTTP(event *event.Event, out chan<- *even
 		c.extractToolUseFromResponse(event, data)
 	case "request":
 		// Look for tool_result blocks in request body.
-		c.extractToolResultFromRequest(event, data, out)
+		c.extractToolResultFromRequest(event, data, emit)
 	}
 }
 
@@ -178,71 +179,72 @@ func (c *ClaudeToolCallAnalyzer) extractToolUseFromResponse(event *event.Event, 
 	}
 }
 
-func (c *ClaudeToolCallAnalyzer) extractToolResultFromRequest(event *event.Event, data map[string]interface{}, out chan<- *event.Event) {
-	body, _ := data["body"].(string)
-	if body == "" {
-		return
-	}
+// toolResultMatch represents a tool_result found in a Claude API request body.
+type toolResultMatch struct {
+	toolUseID     string
+	resultSummary string
+}
 
+// findToolResults scans the request body for tool_result content blocks.
+func findToolResults(body string) []toolResultMatch {
 	var parsed map[string]interface{}
 	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
-		return
+		return nil
 	}
-
 	messages, ok := parsed["messages"].([]interface{})
 	if !ok {
-		return
+		return nil
 	}
 
-	// Scan messages for tool_result content blocks.
+	var results []toolResultMatch
 	for _, msg := range messages {
 		msgMap, ok := msg.(map[string]interface{})
-		if !ok {
+		if !ok || msgMap["role"] != "user" {
 			continue
 		}
-		if msgMap["role"] != "user" {
-			continue
-		}
-
 		content, ok := msgMap["content"].([]interface{})
 		if !ok {
 			continue
 		}
-
 		for _, item := range content {
 			block, ok := item.(map[string]interface{})
-			if !ok {
+			if !ok || block["type"] != "tool_result" {
 				continue
 			}
-			if block["type"] != "tool_result" {
-				continue
-			}
-
 			toolUseID, _ := block["tool_use_id"].(string)
 			if toolUseID == "" {
 				continue
 			}
+			results = append(results, toolResultMatch{
+				toolUseID:     toolUseID,
+				resultSummary: extractResultSummary(block),
+			})
+		}
+	}
+	return results
+}
 
-			// Extract result content summary.
-			resultSummary := extractResultSummary(block)
-
-			c.mu.Lock()
-			pending, exists := c.pending[toolUseID]
-			if exists {
-				delete(c.pending, toolUseID)
-			}
-			c.mu.Unlock()
-
-			if exists {
-				out <- c.buildCompleteEvent(pending, event.TimestampNs, resultSummary, "success")
-			}
+func (c *ClaudeToolCallAnalyzer) extractToolResultFromRequest(event *event.Event, data map[string]interface{}, emit func(*event.Event)) {
+	body, _ := data["body"].(string)
+	if body == "" {
+		return
+	}
+	for _, r := range findToolResults(body) {
+		c.mu.Lock()
+		pending, exists := c.pending[r.toolUseID]
+		if exists {
+			delete(c.pending, r.toolUseID)
+		}
+		c.mu.Unlock()
+		if exists {
+			emit(c.buildCompleteEvent(pending, event.TimestampNs, r.resultSummary, "success"))
 		}
 	}
 }
 
-func (c *ClaudeToolCallAnalyzer) handleProcess(event *event.Event, out chan<- *event.Event) {
+func (c *ClaudeToolCallAnalyzer) handleProcess(event *event.Event, emit func(*event.Event)) {
 	// Always forward the original process event.
-	out <- event
+	emit(event)
 
 	var data map[string]interface{}
 	if err := json.Unmarshal(event.Data, &data); err != nil {
@@ -320,7 +322,7 @@ func (c *ClaudeToolCallAnalyzer) buildCompleteEvent(pending *pendingToolCall, re
 	}
 }
 
-func (c *ClaudeToolCallAnalyzer) flushExpired(out chan<- *event.Event) {
+func (c *ClaudeToolCallAnalyzer) flushExpired(emit func(*event.Event)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -328,18 +330,18 @@ func (c *ClaudeToolCallAnalyzer) flushExpired(out chan<- *event.Event) {
 	for id, pending := range c.pending {
 		elapsed := now.Sub(event.BootNsToTime(pending.responseTime))
 		if elapsed > c.timeout {
-			out <- c.buildCompleteEvent(pending, pending.responseTime+int64(c.timeout), "", "timeout")
+			emit(c.buildCompleteEvent(pending, pending.responseTime+int64(c.timeout), "", "timeout"))
 			delete(c.pending, id)
 		}
 	}
 }
 
-func (c *ClaudeToolCallAnalyzer) flushAll(out chan<- *event.Event, reason string) {
+func (c *ClaudeToolCallAnalyzer) flushAll(emit func(*event.Event), reason string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	for id, pending := range c.pending {
-		out <- c.buildCompleteEvent(pending, pending.responseTime, "", reason)
+		emit(c.buildCompleteEvent(pending, pending.responseTime, "", reason))
 		delete(c.pending, id)
 	}
 }
