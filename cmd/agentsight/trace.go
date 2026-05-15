@@ -15,7 +15,6 @@ import (
 	sslcollector "github.com/haolipeng/LLM-Scope/internal/collectors/ssl"
 	stdiocollector "github.com/haolipeng/LLM-Scope/internal/collectors/stdio"
 	systemcollector "github.com/haolipeng/LLM-Scope/internal/collectors/system"
-	"github.com/haolipeng/LLM-Scope/internal/event"
 	agentsightserver "github.com/haolipeng/LLM-Scope/internal/httpserver"
 	"github.com/haolipeng/LLM-Scope/internal/logging"
 	"github.com/haolipeng/LLM-Scope/internal/pipeline"
@@ -39,9 +38,8 @@ type OutputConfig struct {
 	DuckDBPath string // DuckDB 文件路径，空则不启用
 }
 
-// TraceSSLConfig SSL 监控专用配置
+// TraceSSLConfig SSL 监控专用配置（默认启用）
 type TraceSSLConfig struct {
-	Enabled     bool
 	UID         int
 	Filter      []string
 	Handshake   bool
@@ -53,9 +51,8 @@ type TraceSSLConfig struct {
 	HTTPPCapPath string
 }
 
-// TraceProcessConfig 进程监控专用配置
+// TraceProcessConfig 进程监控专用配置（默认启用）
 type TraceProcessConfig struct {
-	Enabled  bool
 	Duration int
 	Mode     int
 }
@@ -87,8 +84,6 @@ type TraceConfig struct {
 }
 
 var (
-	traceSSL            bool
-	traceProcess        bool
 	traceSystem         bool
 	traceStdio          bool
 	traceComm           string
@@ -120,8 +115,6 @@ var traceCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(traceCmd)
 
-	traceCmd.Flags().BoolVar(&traceSSL, "ssl", true, "启用 SSL 监控")
-	traceCmd.Flags().BoolVar(&traceProcess, "process", true, "启用进程监控")
 	traceCmd.Flags().BoolVar(&traceSystem, "system", false, "启用系统监控")
 	traceCmd.Flags().StringVarP(&traceComm, "comm", "c", "", "进程名过滤(逗号分隔)")
 	traceCmd.Flags().IntVarP(&tracePID, "pid", "p", 0, "PID 过滤")
@@ -150,7 +143,6 @@ func runTrace(cmd *cobra.Command, _ []string) {
 		Comm: traceComm,
 		PID:  tracePID,
 		SSL: TraceSSLConfig{
-			Enabled:      traceSSL,
 			UID:          traceSSLUID,
 			Filter:       traceSSLFilter,
 			Handshake:    traceSSLHandshake,
@@ -161,7 +153,6 @@ func runTrace(cmd *cobra.Command, _ []string) {
 			HTTPPCapPath: traceHTTPPCap,
 		},
 		Process: TraceProcessConfig{
-			Enabled:  traceProcess,
 			Duration: traceDuration,
 			Mode:     traceMode,
 		},
@@ -191,10 +182,6 @@ func runTrace(cmd *cobra.Command, _ []string) {
 
 // validateTraceConfig 检查配置的前置约束
 func validateTraceConfig(cmd *cobra.Command, cfg TraceConfig) {
-	if !cfg.SSL.Enabled && !cfg.Process.Enabled && !cfg.System.Enabled && !cfg.Stdio.Enabled {
-		cliErrln(cmd, "至少启用一种监控类型 (--ssl/--process/--system/--stdio)")
-		os.Exit(1)
-	}
 	if cfg.Stdio.Enabled && cfg.PID == 0 {
 		cliErrln(cmd, "--stdio 需要指定 --pid")
 		os.Exit(1)
@@ -240,19 +227,17 @@ func buildSSLAnalyzerChain(cmd *cobra.Command, sslCfg SSLPipelineConfig) []pipel
 }
 
 // buildRunners 根据配置构建 process/system/stdio runner 列表
+// Process 总是启用；System 和 Stdio 由 Enabled 字段控制。
 func buildRunners(cfg TraceConfig) []pipelinetypes.Runner {
-	var runners []pipelinetypes.Runner
-	if cfg.Process.Enabled {
-		procConfig := processcollector.Config{
-			MinDurationMs: int64(cfg.Process.Duration),
-			PID:           cfg.PID,
-			FilterMode:    cfg.Process.Mode,
-		}
-		if cfg.Comm != "" {
-			procConfig.Commands = splitComm(cfg.Comm)
-		}
-		runners = append(runners, processcollector.New(procConfig))
+	procConfig := processcollector.Config{
+		MinDurationMs: int64(cfg.Process.Duration),
+		PID:           cfg.PID,
+		FilterMode:    cfg.Process.Mode,
 	}
+	if cfg.Comm != "" {
+		procConfig.Commands = splitComm(cfg.Comm)
+	}
+	runners := []pipelinetypes.Runner{processcollector.New(procConfig)}
 	if cfg.System.Enabled {
 		runners = append(runners, systemcollector.New(systemcollector.Config{
 			IntervalSeconds: cfg.System.Interval,
@@ -328,31 +313,26 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 	}
 	defer logging.Sync()
 
-	var allAnalyzers []pipelinetypes.Analyzer
-	var streams []<-chan *event.Event
+	// SSL 监控管道（默认启用）
+	sslAnalyzers := buildSSLAnalyzerChain(cmd, SSLPipelineConfig{
+		SSLFilters:  cfg.SSL.Filter,
+		HTTPRaw:     cfg.SSL.Raw,
+		HTTPPCap:    cfg.SSL.HTTPPCapPath,
+		HTTPFilters: cfg.SSL.HTTPFilter,
+		DisableAuth: cfg.SSL.DisableAuth,
+	})
+	allAnalyzers := sslAnalyzers
 
-	// SSL 监控管道
-	if cfg.SSL.Enabled {
-		sslAnalyzers := buildSSLAnalyzerChain(cmd, SSLPipelineConfig{
-			SSLFilters:  cfg.SSL.Filter,
-			HTTPRaw:     cfg.SSL.Raw,
-			HTTPPCap:    cfg.SSL.HTTPPCapPath,
-			HTTPFilters: cfg.SSL.HTTPFilter,
-			DisableAuth: cfg.SSL.DisableAuth,
-		})
-		allAnalyzers = append(allAnalyzers, sslAnalyzers...)
-
-		sslRunner := sslcollector.New(sslcollector.Config{
-			PID: cfg.PID, UID: cfg.SSL.UID, Comm: cfg.Comm,
-			BinaryPath: cfg.SSL.BinaryPath, OpenSSL: true, Handshake: cfg.SSL.Handshake,
-		})
-		events, err := sslRunner.Run(ctx)
-		if err != nil {
-			cliErrf(cmd, "启动 SSL 监控失败: %v\n", err)
-			os.Exit(1)
-		}
-		streams = append(streams, pipelinecore.Chain(sslAnalyzers...).Process(ctx, events))
+	sslRunner := sslcollector.New(sslcollector.Config{
+		PID: cfg.PID, UID: cfg.SSL.UID, Comm: cfg.Comm,
+		BinaryPath: cfg.SSL.BinaryPath, OpenSSL: true, Handshake: cfg.SSL.Handshake,
+	})
+	sslEvents, err := sslRunner.Run(ctx)
+	if err != nil {
+		cliErrf(cmd, "启动 SSL 监控失败: %v\n", err)
+		os.Exit(1)
 	}
+	sslStream := pipelinecore.Chain(sslAnalyzers...).Process(ctx, sslEvents)
 
 	// 信号处理
 	sigCh := make(chan os.Signal, 1)
@@ -375,7 +355,7 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 		cliErrf(cmd, "启动监控失败: %v\n", err)
 		os.Exit(1)
 	}
-	merged := pipelinestream.MergeStreams(ctx, append(streams, combinedStream)...)
+	merged := pipelinestream.MergeStreams(ctx, sslStream, combinedStream)
 
 	// Sink 和 Server
 	sinks, analyticsDB := buildSinks(cmd, cfg)
@@ -383,8 +363,8 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 		startServer(ctx, cfg.Output.ServerPort, analyticsDB)
 	}
 
-	// 全局管道
-	transforms := buildGlobalTransforms(cfg.SSL.Enabled)
+	// 全局管道（SSL 总是启用，始终使用 ClaudeToolCallAnalyzer）
+	transforms := buildGlobalTransforms(true)
 	p := pipeline.New().WithTransforms(transforms...).WithSinks(sinks...)
 	p.Drain(ctx, merged, nil)
 }

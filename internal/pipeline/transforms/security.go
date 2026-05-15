@@ -68,33 +68,30 @@ func NewSecurityAnalyzerWithRules(rules []SecurityRule) *SecurityAnalyzer {
 func (s *SecurityAnalyzer) initInner() {
 	s.inner = NewStatefulAnalyzer("security_analyzer", StatefulOpts{
 		BufSize: 100,
-		OnEvent: func(ev *event.Event, emit func(*event.Event)) {
-			// Assign stream sequence before forwarding so security alerts can reference this row id after DuckDB insert.
-			if ev.StreamSeq == 0 {
-				ev.StreamSeq = event.NextStreamSeq()
-			}
-			// Always forward the original event.
-			emit(ev)
-
-			// Skip events that are already security alerts.
-			if ev.Source == "security" {
-				return
-			}
-
-			// Parse data once for all rules.
-			var data map[string]interface{}
-			if err := json.Unmarshal(ev.Data, &data); err != nil {
-				return
-			}
-
-			// Check each rule.
-			for _, rule := range s.rules {
-				if alert := rule.Check(ev, data); alert != nil {
-					emit(buildSecurityEvent(ev, alert))
-				}
-			}
-		},
+		OnEvent: s.handleSecurityEvent,
 	})
+}
+
+func (s *SecurityAnalyzer) handleSecurityEvent(ev *event.Event, emit func(*event.Event)) {
+	if ev.StreamSeq == 0 {
+		ev.StreamSeq = event.NextStreamSeq()
+	}
+	emit(ev)
+
+	if ev.Source == "security" {
+		return
+	}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal(ev.Data, &data); err != nil {
+		return
+	}
+
+	for _, rule := range s.rules {
+		if alert := rule.Check(ev, data); alert != nil {
+			emit(buildSecurityEvent(ev, alert))
+		}
+	}
 }
 
 func (s *SecurityAnalyzer) Name() string { return "security_analyzer" }
@@ -195,16 +192,7 @@ func (r *SensitiveFileRule) Check(event *event.Event, data map[string]interface{
 	}
 
 	// Check filepath and filepath2 (for rename).
-	paths := []string{}
-	if fp, ok := data["filepath"].(string); ok && fp != "" {
-		paths = append(paths, fp)
-	}
-	if op, ok := data["oldpath"].(string); ok && op != "" {
-		paths = append(paths, op)
-	}
-	if np, ok := data["newpath"].(string); ok && np != "" {
-		paths = append(paths, np)
-	}
+	paths := collectFilePaths(data)
 
 	for _, path := range paths {
 		if isSensitivePath(path) {
@@ -224,6 +212,17 @@ func (r *SensitiveFileRule) Check(event *event.Event, data map[string]interface{
 		}
 	}
 	return nil
+}
+
+func collectFilePaths(data map[string]interface{}) []string {
+	keys := []string{"filepath", "oldpath", "newpath"}
+	var paths []string
+	for _, key := range keys {
+		if fp, ok := data[key].(string); ok && fp != "" {
+			paths = append(paths, fp)
+		}
+	}
+	return paths
 }
 
 func isSensitivePath(path string) bool {

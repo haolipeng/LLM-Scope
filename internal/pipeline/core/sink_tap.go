@@ -21,6 +21,18 @@ func AttachSinks(sinks ...pipelinetypes.Sink) pipelinetypes.Analyzer {
 
 func (s sinkTap) Name() string { return "sink_tap" }
 
+// distributeEvent 将事件发送到所有 sink channel，返回 false 表示 ctx 已取消。
+func distributeEvent(ctx context.Context, ev *event.Event, sinkChans []chan *event.Event) bool {
+	for _, ch := range sinkChans {
+		select {
+		case ch <- ev:
+		case <-ctx.Done():
+			return false
+		}
+	}
+	return true
+}
+
 func (s sinkTap) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
 	if len(s.sinks) == 0 {
 		return in
@@ -59,12 +71,8 @@ func (s sinkTap) Process(ctx context.Context, in <-chan *event.Event) <-chan *ev
 				if !ok {
 					return
 				}
-				for _, ch := range sinkChans {
-					select {
-					case ch <- event:
-					case <-ctx.Done():
-						return
-					}
+				if !distributeEvent(ctx, event, sinkChans) {
+					return
 				}
 				out <- event
 			}

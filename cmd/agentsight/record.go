@@ -42,7 +42,6 @@ func runRecord(cmd *cobra.Command, _ []string) {
 		Comm: recordComm,
 		PID:  0,
 		SSL: TraceSSLConfig{
-			Enabled:      true,
 			UID:          0,
 			Filter:       []string{"data=0\r\n\r\n|data.type=binary"},
 			Handshake:    false,
@@ -53,7 +52,6 @@ func runRecord(cmd *cobra.Command, _ []string) {
 			HTTPPCapPath: recordHTTPPCap,
 		},
 		Process: TraceProcessConfig{
-			Enabled:  true,
 			Duration: 0,
 			Mode:     0,
 		},

@@ -7,6 +7,25 @@ import (
 	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
+// forwardStream 将单个输入流中的事件转发到输出流，直到输入关闭或 ctx 取消。
+func forwardStream(ctx context.Context, in <-chan *event.Event, out chan<- *event.Event) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-in:
+			if !ok {
+				return
+			}
+			select {
+			case out <- ev:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+}
+
 // MergeStreams 将多个事件流扇入合并为一个输出流。
 //
 // 当 ctx 被取消时会停止转发；当所有输入流都结束后，会关闭输出流。
@@ -27,21 +46,7 @@ func MergeStreams(ctx context.Context, streams ...<-chan *event.Event) <-chan *e
 		wg.Add(1)
 		go func(ch <-chan *event.Event) {
 			defer wg.Done()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case event, ok := <-ch:
-					if !ok {
-						return
-					}
-					select {
-					case out <- event:
-					case <-ctx.Done():
-						return
-					}
-				}
-			}
+			forwardStream(ctx, ch, out)
 		}(stream)
 	}
 

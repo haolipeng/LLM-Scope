@@ -198,28 +198,35 @@ func findToolResults(body string) []toolResultMatch {
 
 	var results []toolResultMatch
 	for _, msg := range messages {
-		msgMap, ok := msg.(map[string]interface{})
-		if !ok || msgMap["role"] != "user" {
+		results = append(results, extractToolResultsFromMessage(msg)...)
+	}
+	return results
+}
+
+// extractToolResultsFromMessage 从单条 user message 中提取 tool_result 块。
+func extractToolResultsFromMessage(msg interface{}) []toolResultMatch {
+	msgMap, ok := msg.(map[string]interface{})
+	if !ok || msgMap["role"] != "user" {
+		return nil
+	}
+	content, ok := msgMap["content"].([]interface{})
+	if !ok {
+		return nil
+	}
+	var results []toolResultMatch
+	for _, item := range content {
+		block, ok := item.(map[string]interface{})
+		if !ok || block["type"] != "tool_result" {
 			continue
 		}
-		content, ok := msgMap["content"].([]interface{})
-		if !ok {
+		toolUseID, _ := block["tool_use_id"].(string)
+		if toolUseID == "" {
 			continue
 		}
-		for _, item := range content {
-			block, ok := item.(map[string]interface{})
-			if !ok || block["type"] != "tool_result" {
-				continue
-			}
-			toolUseID, _ := block["tool_use_id"].(string)
-			if toolUseID == "" {
-				continue
-			}
-			results = append(results, toolResultMatch{
-				toolUseID:     toolUseID,
-				resultSummary: extractResultSummary(block),
-			})
-		}
+		results = append(results, toolResultMatch{
+			toolUseID:     toolUseID,
+			resultSummary: extractResultSummary(block),
+		})
 	}
 	return results
 }

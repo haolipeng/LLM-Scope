@@ -240,31 +240,17 @@ func (r *Runner) parseSSLEvent(raw []byte) *event.Event {
 		"is_handshake": isHandshake,
 	}
 
+	latencyMs := float64(0)
 	if deltaNs > 0 {
-		data["latency_ms"] = float64(deltaNs) / 1_000_000.0
-	} else {
-		data["latency_ms"] = 0
+		latencyMs = float64(deltaNs) / 1_000_000.0
 	}
+	data["latency_ms"] = latencyMs
 
-	if bufFilled == 1 && bufSize > 0 {
-		actualSize := bufSize
-		if actualSize > sslMaxBufSize {
-			actualSize = sslMaxBufSize
-		}
-		if sslOffBuf+int(actualSize) <= len(raw) {
-			bufData := raw[sslOffBuf : sslOffBuf+int(actualSize)]
-			data["data"] = runtimebase.SanitizeBufferData(bufData)
-			data["truncated"] = bufSize < dataLen
-			if bufSize < dataLen {
-				data["bytes_lost"] = dataLen - bufSize
-			}
-		} else {
-			data["data"] = nil
-			data["truncated"] = false
-		}
-	} else {
-		data["data"] = nil
-		data["truncated"] = false
+	bf := extractSSLBufferFields(raw, bufFilled, bufSize, dataLen)
+	data["data"] = bf.data
+	data["truncated"] = bf.truncated
+	if bf.bytesLost > 0 {
+		data["bytes_lost"] = bf.bytesLost
 	}
 
 	jsonData, _ := json.Marshal(data)
@@ -285,4 +271,32 @@ func cStringFromBytes(b []byte) string {
 		}
 	}
 	return strings.TrimRight(string(b), "\x00")
+}
+
+type sslBufferFields struct {
+	data      interface{} // string or nil
+	truncated bool
+	bytesLost uint32 // 0 means no loss
+}
+
+func extractSSLBufferFields(raw []byte, bufFilled int32, bufSize, dataLen uint32) sslBufferFields {
+	if bufFilled != 1 || bufSize == 0 {
+		return sslBufferFields{}
+	}
+	actualSize := bufSize
+	if actualSize > sslMaxBufSize {
+		actualSize = sslMaxBufSize
+	}
+	if sslOffBuf+int(actualSize) > len(raw) {
+		return sslBufferFields{}
+	}
+	bufData := raw[sslOffBuf : sslOffBuf+int(actualSize)]
+	bf := sslBufferFields{
+		data:      runtimebase.SanitizeBufferData(bufData),
+		truncated: bufSize < dataLen,
+	}
+	if bufSize < dataLen {
+		bf.bytesLost = dataLen - bufSize
+	}
+	return bf
 }

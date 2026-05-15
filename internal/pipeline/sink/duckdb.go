@@ -174,6 +174,20 @@ func (s *DuckDBSink) Consume(ctx context.Context, in <-chan *event.Event) {
 
 var toolCallStartPrefix = []byte(`"event_type":"tool_call_start"`)
 
+// tryAddProcessTree adds a process_tree row for the given event if it is an
+// EXEC event and the PID has not been seen before. Must be called with s.mu held.
+func (s *DuckDBSink) tryAddProcessTree(e *event.Event) {
+	row, ok := extractProcessTreeRow(e, s.cfg.SessionID)
+	if !ok {
+		return
+	}
+	if s.seenPIDs[row.pid] {
+		return
+	}
+	s.seenPIDs[row.pid] = true
+	s.buf.processTree = append(s.buf.processTree, row)
+}
+
 func (s *DuckDBSink) addEvent(e *event.Event) {
 	// Skip tool_call_start events (only persist tool_call_end).
 	if e.Source == "tool_call" && bytes.Contains(e.Data, toolCallStartPrefix) {
@@ -188,13 +202,7 @@ func (s *DuckDBSink) addEvent(e *event.Event) {
 	switch e.Source {
 	case "process":
 		s.buf.process = append(s.buf.process, extractProcessRow(e, s.cfg.SessionID))
-		// Build process_tree from EXEC events (one row per unique PID).
-		if row, ok := extractProcessTreeRow(e, s.cfg.SessionID); ok {
-			if !s.seenPIDs[row.pid] {
-				s.seenPIDs[row.pid] = true
-				s.buf.processTree = append(s.buf.processTree, row)
-			}
-		}
+		s.tryAddProcessTree(e)
 	case "tool_call":
 		s.buf.toolCall = append(s.buf.toolCall, extractToolCallRow(e, s.cfg.SessionID))
 	case "system":
@@ -260,41 +268,27 @@ func (s *DuckDBSink) insertBatch(batch *bufferedEvents) error {
 		return id, err
 	}
 
-	if err := insertProcessBatch(tx, batch.process, s.streamToID, nextID); err != nil {
-		tx.Rollback()
-		return fmt.Errorf("process: %w", err)
+	type batchStep struct {
+		name string
+		fn   func() error
 	}
-	if err := insertToolCallBatch(tx, batch.toolCall, s.streamToID, nextID); err != nil {
-		tx.Rollback()
-		return fmt.Errorf("tool_call: %w", err)
+	steps := []batchStep{
+		{"process", func() error { return insertProcessBatch(tx, batch.process, s.streamToID, nextID) }},
+		{"tool_call", func() error { return insertToolCallBatch(tx, batch.toolCall, s.streamToID, nextID) }},
+		{"system", func() error { return insertSystemBatch(tx, batch.system, s.streamToID, nextID) }},
+		{"ssl", func() error { return insertSSLBatch(tx, batch.ssl, s.streamToID, nextID) }},
+		{"http", func() error { return insertHTTPBatch(tx, batch.http, s.streamToID, nextID) }},
+		{"sse", func() error { return insertSSEBatch(tx, batch.sse, s.streamToID, nextID) }},
+		{"security", func() error { return insertSecurityBatch(tx, batch.security, s.streamToID) }},
+		{"process_tree", func() error { return insertProcessTreeBatch(tx, batch.processTree) }},
+		{"event_links", func() error { return insertEventLinksBatch(tx, batch.eventLinks) }},
 	}
-	if err := insertSystemBatch(tx, batch.system, s.streamToID, nextID); err != nil {
-		tx.Rollback()
-		return fmt.Errorf("system: %w", err)
-	}
-	if err := insertSSLBatch(tx, batch.ssl, s.streamToID, nextID); err != nil {
-		tx.Rollback()
-		return fmt.Errorf("ssl: %w", err)
-	}
-	if err := insertHTTPBatch(tx, batch.http, s.streamToID, nextID); err != nil {
-		tx.Rollback()
-		return fmt.Errorf("http: %w", err)
-	}
-	if err := insertSSEBatch(tx, batch.sse, s.streamToID, nextID); err != nil {
-		tx.Rollback()
-		return fmt.Errorf("sse: %w", err)
-	}
-	if err := insertSecurityBatch(tx, batch.security, s.streamToID); err != nil {
-		tx.Rollback()
-		return fmt.Errorf("security: %w", err)
-	}
-	if err := insertProcessTreeBatch(tx, batch.processTree); err != nil {
-		tx.Rollback()
-		return fmt.Errorf("process_tree: %w", err)
-	}
-	if err := insertEventLinksBatch(tx, batch.eventLinks); err != nil {
-		tx.Rollback()
-		return fmt.Errorf("event_links: %w", err)
+
+	for _, step := range steps {
+		if err := step.fn(); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("%s: %w", step.name, err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

@@ -182,28 +182,31 @@ func handleHotFiles(db *sql.DB) gin.HandlerFunc {
 	}
 }
 
+func handleSingleAlert(db *sql.DB, c *gin.Context, idStr string) {
+	idVal, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	rows, err := db.Query("SELECT * FROM v_security_alerts WHERE id = ?", idVal)
+	if err != nil {
+		respondInternalServerError(c, err)
+		return
+	}
+	defer rows.Close()
+	result := rowsToMaps(rows)
+	if len(result) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "alert not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": result[0], "count": 1})
+}
+
 func handleSecurityAlerts(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 单条告警：GET .../security/alerts?id=123
 		if idStr := strings.TrimSpace(c.Query("id")); idStr != "" {
-			idVal, err := strconv.ParseUint(idStr, 10, 64)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
-				return
-			}
-			rows, err := db.Query("SELECT * FROM v_security_alerts WHERE id = ?", idVal)
-			if err != nil {
-				respondInternalServerError(c, err)
-				return
-			}
-			defer rows.Close()
-
-			result := rowsToMaps(rows)
-			if len(result) == 0 {
-				c.JSON(http.StatusNotFound, gin.H{"error": "alert not found"})
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{"data": result[0], "count": 1})
+			handleSingleAlert(db, c, idStr)
 			return
 		}
 
@@ -253,6 +256,42 @@ func handleSessions(db *sql.DB) gin.HandlerFunc {
 	}
 }
 
+type timelineTableDef struct {
+	source string
+	sql    string
+}
+
+var timelineTables = []timelineTableDef{
+	{"process", `SELECT id, session_id, event_time, 'process' AS source, pid, comm,
+				event_type, NULL AS tool_event_type, NULL AS tool_name, NULL AS tool_status,
+				filepath, net_ip, net_port, full_command, data_json
+				FROM events_process`},
+	{"tool_call", `SELECT id, session_id, event_time, 'tool_call' AS source, pid, comm,
+				NULL AS event_type, tool_event_type, tool_name, tool_status,
+				tool_key_field AS filepath, NULL AS net_ip, NULL AS net_port, NULL AS full_command, data_json
+				FROM events_tool_call`},
+	{"system", `SELECT id, session_id, event_time, 'system' AS source, pid, comm,
+				sys_type AS event_type, NULL AS tool_event_type, NULL AS tool_name, NULL AS tool_status,
+				NULL AS filepath, NULL AS net_ip, NULL AS net_port, NULL AS full_command, data_json
+				FROM events_system`},
+	{"ssl", `SELECT id, session_id, event_time, 'ssl' AS source, pid, comm,
+				NULL AS event_type, NULL AS tool_event_type, NULL AS tool_name, NULL AS tool_status,
+				NULL AS filepath, NULL AS net_ip, NULL AS net_port, NULL AS full_command, data_json
+				FROM events_ssl`},
+	{"http_parser", `SELECT id, session_id, event_time, 'http_parser' AS source, pid, comm,
+				NULL AS event_type, NULL AS tool_event_type, NULL AS tool_name, NULL AS tool_status,
+				http_path AS filepath, NULL AS net_ip, NULL AS net_port, http_method AS full_command, data_json
+				FROM events_http`},
+	{"sse_processor", `SELECT id, session_id, event_time, 'sse_processor' AS source, pid, comm,
+				NULL AS event_type, NULL AS tool_event_type, NULL AS tool_name, NULL AS tool_status,
+				NULL AS filepath, NULL AS net_ip, NULL AS net_port, NULL AS full_command, data_json
+				FROM events_sse`},
+	{"security", `SELECT id, session_id, event_time, 'security' AS source, pid, comm,
+				alert_type AS event_type, NULL AS tool_event_type, NULL AS tool_name, risk_level AS tool_status,
+				description AS filepath, NULL AS net_ip, NULL AS net_port, NULL AS full_command, data_json
+				FROM events_security`},
+}
+
 func handleTimeline(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// UNION ALL across all event tables for a unified timeline.
@@ -265,45 +304,9 @@ func handleTimeline(db *sql.DB) gin.HandlerFunc {
 
 		sourceFilter := c.Query("source")
 
-		// Build per-table queries.
-		type tableQuery struct {
-			source string
-			sql    string
-		}
-		tables := []tableQuery{
-			{"process", `SELECT id, session_id, event_time, 'process' AS source, pid, comm,
-				event_type, NULL AS tool_event_type, NULL AS tool_name, NULL AS tool_status,
-				filepath, net_ip, net_port, full_command, data_json
-				FROM events_process`},
-			{"tool_call", `SELECT id, session_id, event_time, 'tool_call' AS source, pid, comm,
-				NULL AS event_type, tool_event_type, tool_name, tool_status,
-				tool_key_field AS filepath, NULL AS net_ip, NULL AS net_port, NULL AS full_command, data_json
-				FROM events_tool_call`},
-			{"system", `SELECT id, session_id, event_time, 'system' AS source, pid, comm,
-				sys_type AS event_type, NULL AS tool_event_type, NULL AS tool_name, NULL AS tool_status,
-				NULL AS filepath, NULL AS net_ip, NULL AS net_port, NULL AS full_command, data_json
-				FROM events_system`},
-			{"ssl", `SELECT id, session_id, event_time, 'ssl' AS source, pid, comm,
-				NULL AS event_type, NULL AS tool_event_type, NULL AS tool_name, NULL AS tool_status,
-				NULL AS filepath, NULL AS net_ip, NULL AS net_port, NULL AS full_command, data_json
-				FROM events_ssl`},
-			{"http_parser", `SELECT id, session_id, event_time, 'http_parser' AS source, pid, comm,
-				NULL AS event_type, NULL AS tool_event_type, NULL AS tool_name, NULL AS tool_status,
-				http_path AS filepath, NULL AS net_ip, NULL AS net_port, http_method AS full_command, data_json
-				FROM events_http`},
-			{"sse_processor", `SELECT id, session_id, event_time, 'sse_processor' AS source, pid, comm,
-				NULL AS event_type, NULL AS tool_event_type, NULL AS tool_name, NULL AS tool_status,
-				NULL AS filepath, NULL AS net_ip, NULL AS net_port, NULL AS full_command, data_json
-				FROM events_sse`},
-			{"security", `SELECT id, session_id, event_time, 'security' AS source, pid, comm,
-				alert_type AS event_type, NULL AS tool_event_type, NULL AS tool_name, risk_level AS tool_status,
-				description AS filepath, NULL AS net_ip, NULL AS net_port, NULL AS full_command, data_json
-				FROM events_security`},
-		}
-
 		var parts []string
 		var queryArgs []any
-		for _, tq := range tables {
+		for _, tq := range timelineTables {
 			if sourceFilter != "" && tq.source != sourceFilter {
 				continue
 			}

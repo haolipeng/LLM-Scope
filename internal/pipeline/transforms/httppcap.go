@@ -87,26 +87,26 @@ func NewHTTPPCAPWriter(path string) (*HTTPPCAPWriter, error) {
 		flows: make(map[flowKey]*flowState),
 	}
 	w.inner = NewStatefulAnalyzer("http_pcap", StatefulOpts{
-		OnEvent: func(ev *event.Event, emit func(*event.Event)) {
-			if ev != nil {
-				switch ev.Source {
-				case "http_parser":
-					if err := w.writeHTTPEvent(ev); err != nil {
-						logging.Named("http_pcap").Warnf("write packet: %v", err)
-					}
-				case "sse_processor":
-					if err := w.writeSSEEvent(ev); err != nil {
-						logging.Named("http_pcap").Warnf("write sse packet: %v", err)
-					}
-				}
-			}
-			emit(ev)
-		},
-		OnClose: func(emit func(*event.Event)) {
-			w.Close()
-		},
+		OnEvent: w.handlePCAPEvent,
+		OnClose: func(emit func(*event.Event)) { w.Close() },
 	})
 	return w, nil
+}
+
+func (w *HTTPPCAPWriter) handlePCAPEvent(ev *event.Event, emit func(*event.Event)) {
+	if ev != nil {
+		switch ev.Source {
+		case "http_parser":
+			if err := w.writeHTTPEvent(ev); err != nil {
+				logging.Named("http_pcap").Warnf("write packet: %v", err)
+			}
+		case "sse_processor":
+			if err := w.writeSSEEvent(ev); err != nil {
+				logging.Named("http_pcap").Warnf("write sse packet: %v", err)
+			}
+		}
+	}
+	emit(ev)
 }
 
 func (w *HTTPPCAPWriter) Name() string { return "http_pcap" }
@@ -173,30 +173,35 @@ func (w *HTTPPCAPWriter) writeSSEEvent(ev *event.Event) error {
 	return w.writeTCPPayload(ev.TimestampNs, ev.PID, false, payload)
 }
 
+// formatSSEEvent 将单个 SSE 事件 map 格式化为 SSE 文本，写入 sb。
+func formatSSEEvent(sb *strings.Builder, item interface{}) {
+	m, ok := item.(map[string]interface{})
+	if !ok {
+		return
+	}
+	evt, _ := m["event"].(string)
+	d, _ := m["data"].(string)
+	if evt != "" {
+		sb.WriteString("event: ")
+		sb.WriteString(evt)
+		sb.WriteString("\n")
+	}
+	if d != "" {
+		sb.WriteString("data: ")
+		sb.WriteString(d)
+		sb.WriteString("\n")
+	}
+	if evt != "" || d != "" {
+		sb.WriteString("\n")
+	}
+}
+
 // buildSSEBody 从 sse_processor 事件数据中构建 HTTP 响应体和 Content-Type。
 func buildSSEBody(data map[string]interface{}) (body string, contentType string) {
 	if sseEvents, ok := data["sse_events"].([]interface{}); ok && len(sseEvents) > 0 {
 		var sb strings.Builder
 		for _, e := range sseEvents {
-			m, ok := e.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			evt, _ := m["event"].(string)
-			d, _ := m["data"].(string)
-			if evt != "" {
-				sb.WriteString("event: ")
-				sb.WriteString(evt)
-				sb.WriteString("\n")
-			}
-			if d != "" {
-				sb.WriteString("data: ")
-				sb.WriteString(d)
-				sb.WriteString("\n")
-			}
-			if evt != "" || d != "" {
-				sb.WriteString("\n")
-			}
+			formatSSEEvent(&sb, e)
 		}
 		if sb.Len() > 0 {
 			return sb.String(), "text/event-stream"
