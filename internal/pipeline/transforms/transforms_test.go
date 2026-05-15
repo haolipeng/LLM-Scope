@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
-	pipelinetypes "github.com/haolipeng/LLM-Scope/internal/pipeline/types"
 	"github.com/haolipeng/LLM-Scope/internal/event"
+	pipelinehttp "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms/http"
+	pipelinesse "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms/sse"
+	pipelinetoolcall "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms/toolcall"
+	pipelinetypes "github.com/haolipeng/LLM-Scope/internal/pipeline/types"
 )
 
 func loadEvent(t *testing.T, name string) *event.Event {
@@ -49,7 +51,7 @@ func TestHTTPParser(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	a := transforms.NewHTTPParser(false)
+	a := pipelinehttp.NewHTTPParser(false)
 	input := []*event.Event{
 		loadEvent(t, "ssl_http_request.json"),
 	}
@@ -64,7 +66,7 @@ func TestSSEMerger(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	a := transforms.NewSSEMerger()
+	a := pipelinesse.NewSSEMerger()
 	input := []*event.Event{
 		loadEvent(t, "ssl_sse_chunk_1.json"),
 		loadEvent(t, "ssl_sse_chunk_2.json"),
@@ -80,7 +82,7 @@ func TestToolCallAggregator(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	a := transforms.NewToolCallAggregator()
+	a := pipelinetoolcall.NewToolCallAggregator()
 	input := []*event.Event{
 		loadEvent(t, "process_exec.json"),
 		loadEvent(t, "process_file_open.json"),

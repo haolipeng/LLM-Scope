@@ -1,4 +1,4 @@
-package transforms
+package toolcall
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/haolipeng/LLM-Scope/internal/event"
+	transforms "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
 )
 
 type toolCallConfig struct {
@@ -40,7 +41,7 @@ type ToolCallAggregator struct {
 	mu         sync.Mutex
 	live       map[toolCallKey]*toolCallState
 	extractors map[string]toolCallExtractor
-	inner      *statefulAnalyzer
+	inner      *transforms.StatefulAnalyzer
 }
 
 func NewToolCallAggregator() *ToolCallAggregator {
@@ -54,7 +55,7 @@ func NewToolCallAggregator() *ToolCallAggregator {
 	}
 	t.extractors["process"] = &processToolCallExtractor{}
 	t.extractors["http_parser"] = &httpToolCallExtractor{}
-	t.inner = NewStatefulAnalyzer("tool_call_aggregator", StatefulOpts{
+	t.inner = transforms.NewStatefulAnalyzer("tool_call_aggregator", transforms.StatefulOpts{
 		TickInterval: t.cfg.idleGap,
 		OnEvent: func(ev *event.Event, emit func(*event.Event)) {
 			extractor, ok := t.extractors[ev.Source]
@@ -242,7 +243,7 @@ func extractTid(event *event.Event) uint32 {
 		if err := json.Unmarshal(event.Data, &payload); err != nil {
 			return 0
 		}
-		if value, ok := toUint64(payload["tid"]); ok {
+		if value, ok := transforms.ToUint64(payload["tid"]); ok {
 			return uint32(value)
 		}
 	}

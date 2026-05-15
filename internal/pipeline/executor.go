@@ -56,12 +56,9 @@ func Execute(cfg ExecuteConfig) error {
 		sinks = append(sinks, pipelinesink.NewOutput())
 	}
 
-	events, err := cfg.Runner.Run(ctx)
-	if err != nil {
-		return err
-	}
-
-	p := New().WithTransforms(cfg.Analyzers...).WithSinks(sinks...)
-	p.Drain(ctx, events, nil)
-	return nil
+	return New().
+		Sources(cfg.Runner).
+		Analyzers(cfg.Analyzers...).
+		Sinks(sinks...).
+		Run(ctx)
 }

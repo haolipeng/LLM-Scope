@@ -1,4 +1,4 @@
-package transforms
+package sse
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/haolipeng/LLM-Scope/internal/event"
+	transforms "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
 )
 
 // SSEMerger merges SSE fragments into a single event.
@@ -15,7 +16,7 @@ type SSEMerger struct {
 	timeout time.Duration
 	mu      sync.Mutex
 	buffers map[string]*sseAccumulator
-	inner   *statefulAnalyzer
+	inner   *transforms.StatefulAnalyzer
 }
 
 func NewSSEMerger() *SSEMerger {
@@ -27,7 +28,7 @@ func NewSSEMergerWithTimeout(timeout time.Duration) *SSEMerger {
 		timeout: timeout,
 		buffers: make(map[string]*sseAccumulator),
 	}
-	s.inner = NewStatefulAnalyzer("sse_merger", StatefulOpts{
+	s.inner = transforms.NewStatefulAnalyzer("sse_merger", transforms.StatefulOpts{
 		TickInterval: timeout,
 		OnEvent: func(ev *event.Event, emit func(*event.Event)) {
 			if ev.Source != "ssl" {
@@ -191,7 +192,7 @@ func getUint64(value interface{}) uint64 {
 	if value == nil {
 		return 0
 	}
-	if parsed, ok := toUint64(value); ok {
+	if parsed, ok := transforms.ToUint64(value); ok {
 		return parsed
 	}
 	return 0

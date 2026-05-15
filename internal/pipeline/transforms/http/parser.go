@@ -1,4 +1,4 @@
-package transforms
+package http
 
 import (
 	"context"
@@ -6,17 +6,18 @@ import (
 	"strings"
 
 	"github.com/haolipeng/LLM-Scope/internal/event"
+	transforms "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
 )
 
 // HTTPParser parses SSL events into HTTP request/response events.
 type HTTPParser struct {
 	includeRaw bool
-	inner      *mapAnalyzer
+	inner      *transforms.MapAnalyzer
 }
 
 func NewHTTPParser(includeRaw bool) *HTTPParser {
 	p := &HTTPParser{includeRaw: includeRaw}
-	p.inner = NewMapAnalyzer("http_parser", p.processEvent)
+	p.inner = transforms.NewMapAnalyzer("http_parser", p.processEvent)
 	return p
 }
 
@@ -56,7 +57,7 @@ func (p *HTTPParser) parseEvent(event *event.Event) *event.Event {
 	}
 
 	tid := uint64(0)
-	if value, ok := toUint64(data["tid"]); ok {
+	if value, ok := transforms.ToUint64(data["tid"]); ok {
 		tid = value
 	}
 
@@ -115,7 +116,7 @@ func parseResponseLine(line string) firstLineResult {
 	r := firstLineResult{msgType: "response"}
 	parts := strings.SplitN(line, " ", 3)
 	if len(parts) >= 2 {
-		if code, err := parseUint(parts[1]); err == nil {
+		if code, err := transforms.ParseUint(parts[1]); err == nil {
 			c := uint16(code)
 			r.statusCode = &c
 		}
@@ -193,7 +194,7 @@ func parseHTTPMessage(data string) *httpMessage {
 func buildHTTPEvent(msg *httpMessage, tid uint64, original *event.Event, includeRaw bool) *event.Event {
 	contentLength := int64(-1)
 	if value, ok := msg.headers["content-length"]; ok {
-		if parsed, err := parseInt(value); err == nil {
+		if parsed, err := transforms.ParseInt(value); err == nil {
 			contentLength = parsed
 		}
 	}

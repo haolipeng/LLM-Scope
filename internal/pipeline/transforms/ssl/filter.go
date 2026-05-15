@@ -1,4 +1,4 @@
-package transforms
+package ssl
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/haolipeng/LLM-Scope/internal/event"
+	transforms "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
 )
 
 var (
@@ -30,7 +31,7 @@ type SSLFilter struct {
 	total    atomic.Int64
 	filtered atomic.Int64
 	passed   atomic.Int64
-	inner    *mapAnalyzer
+	inner    *transforms.MapAnalyzer
 }
 
 func NewSSLFilter(patterns []string) *SSLFilter {
@@ -39,7 +40,7 @@ func NewSSLFilter(patterns []string) *SSLFilter {
 		filters = append(filters, parseSSLFilter(pattern))
 	}
 	f := &SSLFilter{filters: filters}
-	f.inner = NewMapAnalyzer("ssl_filter", f.processEvent)
+	f.inner = transforms.NewMapAnalyzer("ssl_filter", f.processEvent)
 	return f
 }
 
@@ -232,7 +233,7 @@ type sslFieldEvaluator func(data map[string]interface{}, node sslFilterNode) boo
 func evalSSLStringField(field string) sslFieldEvaluator {
 	return func(data map[string]interface{}, node sslFilterNode) bool {
 		if value, ok := data[field].(string); ok {
-			return compareStrings(value, node.operator, node.value)
+			return transforms.CompareStrings(value, node.operator, node.value)
 		}
 		return false
 	}
@@ -249,8 +250,8 @@ func evalSSLBoolField(field string) sslFieldEvaluator {
 
 func evalSSLUint64Field(field string) sslFieldEvaluator {
 	return func(data map[string]interface{}, node sslFilterNode) bool {
-		if value, ok := toUint64(data[field]); ok {
-			return compareNumbers(value, node.operator, node.value)
+		if value, ok := transforms.ToUint64(data[field]); ok {
+			return transforms.CompareNumbers(value, node.operator, node.value)
 		}
 		return false
 	}
@@ -258,8 +259,8 @@ func evalSSLUint64Field(field string) sslFieldEvaluator {
 
 func evalSSLFloat64Field(field string) sslFieldEvaluator {
 	return func(data map[string]interface{}, node sslFilterNode) bool {
-		if value, ok := toFloat64(data[field]); ok {
-			return compareFloats(value, node.operator, node.value)
+		if value, ok := transforms.ToFloat64(data[field]); ok {
+			return transforms.CompareFloats(value, node.operator, node.value)
 		}
 		return false
 	}
@@ -268,7 +269,7 @@ func evalSSLFloat64Field(field string) sslFieldEvaluator {
 var sslFieldEvaluators = map[string]sslFieldEvaluator{
 	"data.type": func(data map[string]interface{}, node sslFilterNode) bool {
 		if value, ok := data["data"].(string); ok {
-			return compareStrings(detectDataType(value), node.operator, node.value)
+			return transforms.CompareStrings(transforms.DetectDataType(value), node.operator, node.value)
 		}
 		return false
 	},

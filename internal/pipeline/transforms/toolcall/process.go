@@ -1,9 +1,11 @@
-package transforms
+package toolcall
 
 import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	transforms "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
 )
 
 type toolCallExtraction struct {
@@ -64,8 +66,8 @@ var (
 		"/proc/", "/sys/", "/dev/",
 		"/usr/lib/", "/lib/", "/usr/share/",
 	}
-	noiseSuffixes  = []string{".so", ".lock", ".pid"}
-	noiseContains  = []string{".so.", ".cursor-server/", "/node_modules/", "/.git/objects/"}
+	noiseSuffixes = []string{".so", ".lock", ".pid"}
+	noiseContains = []string{".so.", ".cursor-server/", "/node_modules/", "/.git/objects/"}
 )
 
 func isNoiseFilePath(path string) bool {
@@ -94,7 +96,7 @@ func isNoiseFilePath(path string) bool {
 }
 
 func (e *processToolCallExtractor) extractFileOpen(payload map[string]interface{}) []toolCallExtraction {
-	flagsValue, _ := toUint64(payload["flags"])
+	flagsValue, _ := transforms.ToUint64(payload["flags"])
 	filepath := getStringValue(payload["filepath"], "")
 	if filepath == "" {
 		return nil

@@ -1,4 +1,4 @@
-package transforms
+package security
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/haolipeng/LLM-Scope/internal/event"
+	transforms "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
 )
 
 // SecurityRule checks an event and optionally returns a SecurityAlert.
@@ -41,7 +42,7 @@ type Evidence struct {
 // separate security alert event is injected into the output stream.
 type SecurityAnalyzer struct {
 	rules []SecurityRule
-	inner *statefulAnalyzer
+	inner *transforms.StatefulAnalyzer
 }
 
 // NewSecurityAnalyzer creates a SecurityAnalyzer with the built-in rule set.
@@ -66,7 +67,7 @@ func NewSecurityAnalyzerWithRules(rules []SecurityRule) *SecurityAnalyzer {
 }
 
 func (s *SecurityAnalyzer) initInner() {
-	s.inner = NewStatefulAnalyzer("security_analyzer", StatefulOpts{
+	s.inner = transforms.NewStatefulAnalyzer("security_analyzer", transforms.StatefulOpts{
 		BufSize: 100,
 		OnEvent: s.handleSecurityEvent,
 	})

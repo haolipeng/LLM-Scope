@@ -25,7 +25,7 @@ var mockDataCmd = &cobra.Command{
 }
 
 func init() {
-	mockDataCmd.Flags().StringVar(&mockDuckDBPath, "duckdb-path", "agentsight.duckdb", "DuckDB 文件路径（与 record/trace --duckdb-path 一致）")
+	mockDataCmd.Flags().StringVar(&mockDuckDBPath, "duckdb-path", pipelinesink.DefaultDuckDBPath(), "DuckDB 文件路径（与 record/trace --duckdb-path 一致）")
 	rootCmd.AddCommand(mockDataCmd)
 }
 

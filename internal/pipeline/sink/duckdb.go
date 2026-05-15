@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -18,9 +19,21 @@ import (
 	"go.uber.org/zap"
 )
 
+// DefaultDuckDBPath returns the default DuckDB file path: ~/.agentsight/agentsight.duckdb.
+// It creates the directory if it does not exist.
+func DefaultDuckDBPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	dir := filepath.Join(home, ".agentsight")
+	_ = os.MkdirAll(dir, 0o755)
+	return filepath.Join(dir, "agentsight.duckdb")
+}
+
 // DuckDBConfig controls DuckDBSink behaviour.
 type DuckDBConfig struct {
-	DBPath        string        // database file path, default "agentsight.duckdb"
+	DBPath        string        // database file path, default ~/.agentsight/agentsight.duckdb
 	BatchSize     int           // flush threshold, default 1000
 	FlushInterval time.Duration // periodic flush, default 5s
 	SessionID     string        // session identifier, auto-generated when empty
@@ -30,7 +43,7 @@ type DuckDBConfig struct {
 
 func (c *DuckDBConfig) defaults() {
 	if c.DBPath == "" {
-		c.DBPath = "agentsight.duckdb"
+		c.DBPath = DefaultDuckDBPath()
 	}
 	if c.BatchSize <= 0 {
 		c.BatchSize = 1000

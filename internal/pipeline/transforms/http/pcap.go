@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 eunomia-bpf org.
 
-package transforms
+package http
 
 import (
 	"bytes"
@@ -21,6 +21,7 @@ import (
 	"github.com/google/gopacket/pcapgo"
 	"github.com/haolipeng/LLM-Scope/internal/event"
 	"github.com/haolipeng/LLM-Scope/internal/logging"
+	transforms "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
 )
 
 // HTTPPCAPWriter writes decrypted HTTP messages as synthetic Ethernet/IPv4/TCP
@@ -36,7 +37,7 @@ type HTTPPCAPWriter struct {
 	path  string
 	file  *os.File
 	pw    *pcapgo.Writer
-	inner *statefulAnalyzer
+	inner *transforms.StatefulAnalyzer
 
 	mu    sync.Mutex
 	flows map[flowKey]*flowState
@@ -86,7 +87,7 @@ func NewHTTPPCAPWriter(path string) (*HTTPPCAPWriter, error) {
 		pw:    pw,
 		flows: make(map[flowKey]*flowState),
 	}
-	w.inner = NewStatefulAnalyzer("http_pcap", StatefulOpts{
+	w.inner = transforms.NewStatefulAnalyzer("http_pcap", transforms.StatefulOpts{
 		OnEvent: w.handlePCAPEvent,
 		OnClose: func(emit func(*event.Event)) { w.Close() },
 	})
@@ -159,7 +160,7 @@ func (w *HTTPPCAPWriter) writeHTTPEvent(ev *event.Event) error {
 }
 
 // writeSSEEvent handles sse_processor events by reconstructing a synthetic HTTP
-// response from the merged SSE data and writing it as a server→client packet.
+// response from the merged SSE data and writing it as a server->client packet.
 func (w *HTTPPCAPWriter) writeSSEEvent(ev *event.Event) error {
 	var data map[string]interface{}
 	if err := json.Unmarshal(ev.Data, &data); err != nil {
@@ -169,7 +170,7 @@ func (w *HTTPPCAPWriter) writeSSEEvent(ev *event.Event) error {
 	if len(payload) == 0 {
 		return nil
 	}
-	// SSE responses are always server→client
+	// SSE responses are always server->client
 	return w.writeTCPPayload(ev.TimestampNs, ev.PID, false, payload)
 }
 

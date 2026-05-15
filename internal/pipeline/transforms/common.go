@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func detectDataType(data string) string {
+func DetectDataType(data string) string {
 	for _, r := range data {
 		if r < 0x20 && r != '\n' && r != '\r' && r != '\t' {
 			return "binary"
@@ -15,14 +15,14 @@ func detectDataType(data string) string {
 	return "text"
 }
 
-func dataToString(data string) string {
-	if detectDataType(data) == "text" {
+func DataToString(data string) string {
+	if DetectDataType(data) == "text" {
 		return data
 	}
 	return "HEX:" + hex.EncodeToString([]byte(data))
 }
 
-func toUint64(value interface{}) (uint64, bool) {
+func ToUint64(value interface{}) (uint64, bool) {
 	switch v := value.(type) {
 	case float64:
 		return uint64(v), true
@@ -43,7 +43,7 @@ func toUint64(value interface{}) (uint64, bool) {
 	}
 }
 
-func toFloat64(value interface{}) (float64, bool) {
+func ToFloat64(value interface{}) (float64, bool) {
 	switch v := value.(type) {
 	case float64:
 		return v, true
@@ -62,7 +62,7 @@ func toFloat64(value interface{}) (float64, bool) {
 	}
 }
 
-func compareStrings(actual, operator, expected string) bool {
+func CompareStrings(actual, operator, expected string) bool {
 	switch operator {
 	case "exact":
 		return actual == expected
@@ -79,8 +79,8 @@ func compareStrings(actual, operator, expected string) bool {
 	}
 }
 
-func compareNumbers(actual uint64, operator, expected string) bool {
-	target, err := parseUint(expected)
+func CompareNumbers(actual uint64, operator, expected string) bool {
+	target, err := ParseUint(expected)
 	if err != nil {
 		return false
 	}
@@ -102,8 +102,8 @@ func compareNumbers(actual uint64, operator, expected string) bool {
 	}
 }
 
-func compareFloats(actual float64, operator, expected string) bool {
-	target, err := parseFloat(expected)
+func CompareFloats(actual float64, operator, expected string) bool {
+	target, err := ParseFloat(expected)
 	if err != nil {
 		return false
 	}
@@ -125,11 +125,11 @@ func compareFloats(actual float64, operator, expected string) bool {
 	}
 }
 
-func parseFloat(value string) (float64, error) {
+func ParseFloat(value string) (float64, error) {
 	return json.Number(strings.TrimSpace(value)).Float64()
 }
 
-func parseUint(value string) (uint64, error) {
+func ParseUint(value string) (uint64, error) {
 	parsed, err := json.Number(strings.TrimSpace(value)).Int64()
 	if err != nil {
 		return 0, err
@@ -137,11 +137,11 @@ func parseUint(value string) (uint64, error) {
 	return uint64(parsed), nil
 }
 
-func parseInt(value string) (int64, error) {
+func ParseInt(value string) (int64, error) {
 	return json.Number(strings.TrimSpace(value)).Int64()
 }
 
-func splitAndTrim(value, sep string) []string {
+func SplitAndTrim(value, sep string) []string {
 	parts := strings.Split(value, sep)
 	out := make([]string, 0, len(parts))
 	for _, part := range parts {
@@ -153,7 +153,7 @@ func splitAndTrim(value, sep string) []string {
 	return out
 }
 
-func mapStringMap(value interface{}) map[string]string {
+func MapStringMap(value interface{}) map[string]string {
 	out := map[string]string{}
 	raw, ok := value.(map[string]interface{})
 	if !ok {

@@ -1,4 +1,4 @@
-package transforms
+package toolcall
 
 import (
 	"context"
@@ -8,6 +8,28 @@ import (
 
 	"github.com/haolipeng/LLM-Scope/internal/event"
 )
+
+// makeEvent builds a generic event with the given source and data map.
+func makeEvent(source string, data map[string]interface{}) *event.Event {
+	d, _ := json.Marshal(data)
+	return &event.Event{
+		TimestampNs:     1000,
+		TimestampUnixMs: 1700000000000,
+		Source:          source,
+		PID:             1234,
+		Comm:            "test",
+		Data:            d,
+	}
+}
+
+// collectAll drains a channel and returns all received events.
+func collectAll(ch <-chan *event.Event) []*event.Event {
+	var result []*event.Event
+	for e := range ch {
+		result = append(result, e)
+	}
+	return result
+}
 
 // makeHTTPResponse builds an http_parser response event with a JSON body.
 func makeHTTPResponse(body map[string]interface{}) *event.Event {

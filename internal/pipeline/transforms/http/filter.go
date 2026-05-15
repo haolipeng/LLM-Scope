@@ -1,4 +1,4 @@
-package transforms
+package http
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/haolipeng/LLM-Scope/internal/event"
+	transforms "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
 )
 
 var (
@@ -30,7 +31,7 @@ type HTTPFilter struct {
 	total    atomic.Int64
 	filtered atomic.Int64
 	passed   atomic.Int64
-	inner    *mapAnalyzer
+	inner    *transforms.MapAnalyzer
 }
 
 func NewHTTPFilter(patterns []string) *HTTPFilter {
@@ -39,7 +40,7 @@ func NewHTTPFilter(patterns []string) *HTTPFilter {
 		filters = append(filters, parseHTTPFilter(pattern))
 	}
 	f := &HTTPFilter{filters: filters}
-	f.inner = NewMapAnalyzer("http_filter", f.processEvent)
+	f.inner = transforms.NewMapAnalyzer("http_filter", f.processEvent)
 	return f
 }
 
@@ -90,7 +91,7 @@ func parseHTTPFilter(expr string) httpFilterExpression {
 }
 
 func parseHTTPOr(expr string) httpFilterNode {
-	parts := splitAndTrim(expr, "|")
+	parts := transforms.SplitAndTrim(expr, "|")
 	if len(parts) > 1 {
 		nodes := make([]httpFilterNode, 0, len(parts))
 		for _, part := range parts {
@@ -102,7 +103,7 @@ func parseHTTPOr(expr string) httpFilterNode {
 }
 
 func parseHTTPAnd(expr string) httpFilterNode {
-	parts := splitAndTrim(expr, "&")
+	parts := transforms.SplitAndTrim(expr, "&")
 	if len(parts) > 1 {
 		nodes := make([]httpFilterNode, 0, len(parts))
 		for _, part := range parts {
@@ -266,7 +267,7 @@ func evalHTTPRequestCondition(node httpFilterNode, data map[string]interface{}) 
 		path, _ := data["path"].(string)
 		return strings.Contains(path, node.value)
 	case "host", "hostname":
-		headers := mapStringMap(data["headers"])
+		headers := transforms.MapStringMap(data["headers"])
 		host := headers["host"]
 		return host == node.value
 	case "body", "body_contains":
@@ -285,8 +286,8 @@ func evalHTTPRequestCondition(node httpFilterNode, data map[string]interface{}) 
 func evalHTTPResponseCondition(node httpFilterNode, data map[string]interface{}) bool {
 	switch node.field {
 	case "status_code", "status", "code":
-		if value, ok := toUint64(data["status_code"]); ok {
-			target, err := parseUint(node.value)
+		if value, ok := transforms.ToUint64(data["status_code"]); ok {
+			target, err := transforms.ParseUint(node.value)
 			if err != nil {
 				return false
 			}
@@ -297,18 +298,18 @@ func evalHTTPResponseCondition(node httpFilterNode, data map[string]interface{})
 		status, _ := data["status_text"].(string)
 		return strings.Contains(strings.ToLower(status), strings.ToLower(node.value))
 	case "content_type", "content-type":
-		headers := mapStringMap(data["headers"])
+		headers := transforms.MapStringMap(data["headers"])
 		contentType := headers["content-type"]
 		return strings.Contains(contentType, node.value)
 	case "server":
-		headers := mapStringMap(data["headers"])
+		headers := transforms.MapStringMap(data["headers"])
 		server := headers["server"]
 		return strings.Contains(server, node.value)
 	case "body", "body_contains":
 		body, _ := data["body"].(string)
 		return strings.Contains(body, node.value)
 	default:
-		headers := mapStringMap(data["headers"])
+		headers := transforms.MapStringMap(data["headers"])
 		header := headers[node.field]
 		return strings.Contains(header, node.value)
 	}

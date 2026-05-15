@@ -7,21 +7,21 @@ import (
 	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
-// mapAnalyzer implements a stateless Analyzer that processes events one at a time.
-type mapAnalyzer struct {
+// MapAnalyzer implements a stateless Analyzer that processes events one at a time.
+type MapAnalyzer struct {
 	name string
 	fn   func(*event.Event) []*event.Event
 }
 
 // NewMapAnalyzer creates a stateless Analyzer: per-event processing, no ticker.
 // fn returns nil to filter (drop the event), or multiple events to fan out.
-func NewMapAnalyzer(name string, fn func(*event.Event) []*event.Event) *mapAnalyzer {
-	return &mapAnalyzer{name: name, fn: fn}
+func NewMapAnalyzer(name string, fn func(*event.Event) []*event.Event) *MapAnalyzer {
+	return &MapAnalyzer{name: name, fn: fn}
 }
 
-func (a *mapAnalyzer) Name() string { return a.name }
+func (a *MapAnalyzer) Name() string { return a.name }
 
-func (a *mapAnalyzer) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
+func (a *MapAnalyzer) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
 	out := make(chan *event.Event)
 	go func() {
 		defer close(out)
@@ -52,20 +52,20 @@ type StatefulOpts struct {
 	OnClose      func(emit func(*event.Event))           // optional, called on ctx cancel or in closed
 }
 
-// statefulAnalyzer implements an Analyzer with ticker and close support.
-type statefulAnalyzer struct {
+// StatefulAnalyzer implements an Analyzer with ticker and close support.
+type StatefulAnalyzer struct {
 	name string
 	opts StatefulOpts
 }
 
 // NewStatefulAnalyzer creates a stateful Analyzer with ticker and close support.
-func NewStatefulAnalyzer(name string, opts StatefulOpts) *statefulAnalyzer {
-	return &statefulAnalyzer{name: name, opts: opts}
+func NewStatefulAnalyzer(name string, opts StatefulOpts) *StatefulAnalyzer {
+	return &StatefulAnalyzer{name: name, opts: opts}
 }
 
-func (a *statefulAnalyzer) Name() string { return a.name }
+func (a *StatefulAnalyzer) Name() string { return a.name }
 
-func (a *statefulAnalyzer) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
+func (a *StatefulAnalyzer) Process(ctx context.Context, in <-chan *event.Event) <-chan *event.Event {
 	out := make(chan *event.Event, a.opts.BufSize)
 
 	emit := func(ev *event.Event) {

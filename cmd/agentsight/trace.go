@@ -18,10 +18,12 @@ import (
 	agentsightserver "github.com/haolipeng/LLM-Scope/internal/httpserver"
 	"github.com/haolipeng/LLM-Scope/internal/logging"
 	"github.com/haolipeng/LLM-Scope/internal/pipeline"
-	pipelinecore "github.com/haolipeng/LLM-Scope/internal/pipeline/core"
 	pipelinesink "github.com/haolipeng/LLM-Scope/internal/pipeline/sink"
-	pipelinestream "github.com/haolipeng/LLM-Scope/internal/pipeline/stream"
-	pipelinetransforms "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
+	pipelinehttp "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms/http"
+	pipelinesecurity "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms/security"
+	pipelinessl "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms/ssl"
+	pipelinesse "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms/sse"
+	pipelinetoolcall "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms/toolcall"
 	pipelinetypes "github.com/haolipeng/LLM-Scope/internal/pipeline/types"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -84,6 +86,8 @@ type TraceConfig struct {
 }
 
 var (
+	traceServer         bool
+	traceQuiet          bool
 	traceSystem         bool
 	traceStdio          bool
 	traceComm           string
@@ -115,6 +119,8 @@ var traceCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(traceCmd)
 
+	traceCmd.Flags().BoolVar(&traceServer, "server", false, "启动 Web 服务器")
+	traceCmd.Flags().BoolVarP(&traceQuiet, "quiet", "q", false, "禁用控制台输出")
 	traceCmd.Flags().BoolVar(&traceSystem, "system", false, "启用系统监控")
 	traceCmd.Flags().StringVarP(&traceComm, "comm", "c", "", "进程名过滤(逗号分隔)")
 	traceCmd.Flags().IntVarP(&tracePID, "pid", "p", 0, "PID 过滤")
@@ -168,10 +174,10 @@ func runTrace(cmd *cobra.Command, _ []string) {
 			MaxBytes: traceStdioMaxBytes,
 		},
 		Output: OutputConfig{
-			Server:     server,
+			Server:     traceServer,
 			ServerPort: serverPort,
 			LogFile:    logFile,
-			Quiet:      quiet,
+			Quiet:      traceQuiet,
 			RotateLogs: rotateLogs,
 			MaxLogSize: maxLogSize,
 			DuckDBPath: traceDuckDBPath,
@@ -191,37 +197,43 @@ func validateTraceConfig(cmd *cobra.Command, cfg TraceConfig) {
 // SSLPipelineConfig 描述 SSL 分析管道的构建参数（trace 和 ssl 命令共用）
 type SSLPipelineConfig struct {
 	SSLFilters  []string
+	SSEMerge    bool // true 时添加 SSEMerger
+	HTTPParse   bool // true 时添加 HTTP 解析链
 	HTTPRaw     bool
 	HTTPPCap    string
 	HTTPFilters []string
 	DisableAuth bool
 }
 
-// buildSSLAnalyzerChain 构建 SSL 分析器链：SSL 过滤 → SSE 合并 → HTTP 解析 → pcap → HTTP 过滤 → 认证头移除
+// buildSSLAnalyzerChain 构建 SSL 分析器链：SSL 过滤 → [SSE 合并] → [HTTP 解析 → pcap → HTTP 过滤 → 认证头移除]
 func buildSSLAnalyzerChain(cmd *cobra.Command, sslCfg SSLPipelineConfig) []pipelinetypes.Analyzer {
 	var analyzers []pipelinetypes.Analyzer
 	if len(sslCfg.SSLFilters) > 0 {
-		analyzers = append(analyzers, pipelinetransforms.NewSSLFilter(sslCfg.SSLFilters))
+		analyzers = append(analyzers, pipelinessl.NewSSLFilter(sslCfg.SSLFilters))
 	}
-	analyzers = append(analyzers, pipelinetransforms.NewSSEMerger())
-	// When writing pcap, force raw data inclusion so payloads stay faithful.
-	includeRaw := sslCfg.HTTPRaw || sslCfg.HTTPPCap != ""
-	analyzers = append(analyzers, pipelinetransforms.NewHTTPParser(includeRaw))
-	if sslCfg.HTTPPCap != "" {
-		pcapW, err := pipelinetransforms.NewHTTPPCAPWriter(sslCfg.HTTPPCap)
-		if err != nil {
-			cliErrf(cmd, "HTTP pcap: %v\n", err)
-			os.Exit(1)
+	if sslCfg.SSEMerge {
+		analyzers = append(analyzers, pipelinesse.NewSSEMerger())
+	}
+	if sslCfg.HTTPParse {
+		// When writing pcap, force raw data inclusion so payloads stay faithful.
+		includeRaw := sslCfg.HTTPRaw || sslCfg.HTTPPCap != ""
+		analyzers = append(analyzers, pipelinehttp.NewHTTPParser(includeRaw))
+		if sslCfg.HTTPPCap != "" {
+			pcapW, err := pipelinehttp.NewHTTPPCAPWriter(sslCfg.HTTPPCap)
+			if err != nil {
+				cliErrf(cmd, "HTTP pcap: %v\n", err)
+				os.Exit(1)
+			}
+			if pcapW != nil {
+				analyzers = append(analyzers, pcapW)
+			}
 		}
-		if pcapW != nil {
-			analyzers = append(analyzers, pcapW)
+		if len(sslCfg.HTTPFilters) > 0 {
+			analyzers = append(analyzers, pipelinehttp.NewHTTPFilter(sslCfg.HTTPFilters))
 		}
-	}
-	if len(sslCfg.HTTPFilters) > 0 {
-		analyzers = append(analyzers, pipelinetransforms.NewHTTPFilter(sslCfg.HTTPFilters))
-	}
-	if !sslCfg.DisableAuth {
-		analyzers = append(analyzers, pipelinetransforms.NewAuthRemover())
+		if !sslCfg.DisableAuth {
+			analyzers = append(analyzers, pipelinehttp.NewAuthRemover())
+		}
 	}
 	return analyzers
 }
@@ -286,11 +298,11 @@ func buildSinks(cmd *cobra.Command, cfg TraceConfig) ([]pipelinetypes.Sink, *sql
 
 // buildGlobalTransforms 构建全局分析管道的 transform 列表
 func buildGlobalTransforms(sslEnabled bool) []pipelinetypes.Analyzer {
-	transforms := []pipelinetypes.Analyzer{pipelinetransforms.NewSecurityAnalyzer()}
+	transforms := []pipelinetypes.Analyzer{pipelinesecurity.NewSecurityAnalyzer()}
 	if sslEnabled {
-		transforms = append(transforms, pipelinetransforms.NewClaudeToolCallAnalyzer())
+		transforms = append(transforms, pipelinetoolcall.NewClaudeToolCallAnalyzer())
 	} else {
-		transforms = append(transforms, pipelinetransforms.NewToolCallAggregator())
+		transforms = append(transforms, pipelinetoolcall.NewToolCallAggregator())
 	}
 	return transforms
 }
@@ -313,33 +325,23 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 	}
 	defer logging.Sync()
 
-	// SSL 监控管道（默认启用）
+	// SSL 专属分析链
 	sslAnalyzers := buildSSLAnalyzerChain(cmd, SSLPipelineConfig{
 		SSLFilters:  cfg.SSL.Filter,
+		SSEMerge:    true, // trace 固定启用
+		HTTPParse:   true, // trace 固定启用
 		HTTPRaw:     cfg.SSL.Raw,
 		HTTPPCap:    cfg.SSL.HTTPPCapPath,
 		HTTPFilters: cfg.SSL.HTTPFilter,
 		DisableAuth: cfg.SSL.DisableAuth,
 	})
-	allAnalyzers := sslAnalyzers
 
-	sslRunner := sslcollector.New(sslcollector.Config{
-		PID: cfg.PID, UID: cfg.SSL.UID, Comm: cfg.Comm,
-		BinaryPath: cfg.SSL.BinaryPath, OpenSSL: true, Handshake: cfg.SSL.Handshake,
-	})
-	sslEvents, err := sslRunner.Run(ctx)
-	if err != nil {
-		cliErrf(cmd, "启动 SSL 监控失败: %v\n", err)
-		os.Exit(1)
-	}
-	sslStream := pipelinecore.Chain(sslAnalyzers...).Process(ctx, sslEvents)
-
-	// 信号处理
+	// 信号处理：上报分析器指标
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		for _, a := range allAnalyzers {
+		for _, a := range sslAnalyzers {
 			if r, ok := a.(pipelinetypes.MetricsReporter); ok {
 				r.ReportMetrics()
 			}
@@ -347,15 +349,12 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 		cancel()
 	}()
 
-	// 合并 runner 输出
+	// 数据源
+	sslRunner := sslcollector.New(sslcollector.Config{
+		PID: cfg.PID, UID: cfg.SSL.UID, Comm: cfg.Comm,
+		BinaryPath: cfg.SSL.BinaryPath, OpenSSL: true, Handshake: cfg.SSL.Handshake,
+	})
 	runners := buildRunners(cfg)
-	combined := pipelinestream.NewCombinedRunner(runners...)
-	combinedStream, err := combined.Run(ctx)
-	if err != nil {
-		cliErrf(cmd, "启动监控失败: %v\n", err)
-		os.Exit(1)
-	}
-	merged := pipelinestream.MergeStreams(ctx, sslStream, combinedStream)
 
 	// Sink 和 Server
 	sinks, analyticsDB := buildSinks(cmd, cfg)
@@ -363,10 +362,22 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 		startServer(ctx, cfg.Output.ServerPort, analyticsDB)
 	}
 
-	// 全局管道（SSL 总是启用，始终使用 ClaudeToolCallAnalyzer）
+	// 全局 transforms
 	transforms := buildGlobalTransforms(true)
-	p := pipeline.New().WithTransforms(transforms...).WithSinks(sinks...)
-	p.Drain(ctx, merged, nil)
+
+	// 管道：SSL(带专属预处理) + 其他 Runner → 全局 transforms → sinks
+	sources := make([]pipelinetypes.Runner, 0, 1+len(runners))
+	sources = append(sources, pipeline.WithAnalyzers(sslRunner, sslAnalyzers...))
+	sources = append(sources, runners...)
+
+	if err := pipeline.New().
+		Sources(sources...).
+		Analyzers(transforms...).
+		Sinks(sinks...).
+		Run(ctx); err != nil {
+		cliErrf(cmd, "启动监控失败: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 // startServer 启动 HTTP 服务器并注册优雅关闭

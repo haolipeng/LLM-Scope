@@ -1,4 +1,4 @@
-package transforms
+package http
 
 import (
 	"context"
@@ -7,13 +7,14 @@ import (
 
 	"github.com/haolipeng/LLM-Scope/internal/event"
 	"github.com/haolipeng/LLM-Scope/internal/logging"
+	transforms "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
 )
 
 // AuthRemover 从 HTTP 事件中移除敏感认证头。
 type AuthRemover struct {
 	headers []string
 	debug   bool
-	inner   *mapAnalyzer
+	inner   *transforms.MapAnalyzer
 }
 
 func NewAuthRemover() *AuthRemover {
@@ -30,14 +31,14 @@ func NewAuthRemover() *AuthRemover {
 			"set-cookie",
 		},
 	}
-	a.inner = NewMapAnalyzer("auth_remover", a.processEvent)
+	a.inner = transforms.NewMapAnalyzer("auth_remover", a.processEvent)
 	return a
 }
 
 func NewAuthRemoverWithDebug(debug bool) *AuthRemover {
 	a := NewAuthRemover()
 	a.debug = debug
-	a.inner = NewMapAnalyzer("auth_remover", a.processEvent)
+	a.inner = transforms.NewMapAnalyzer("auth_remover", a.processEvent)
 	return a
 }
 

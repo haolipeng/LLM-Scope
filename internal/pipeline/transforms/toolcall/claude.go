@@ -1,4 +1,4 @@
-package transforms
+package toolcall
 
 import (
 	"context"
@@ -8,15 +8,16 @@ import (
 	"time"
 
 	"github.com/haolipeng/LLM-Scope/internal/event"
+	transforms "github.com/haolipeng/LLM-Scope/internal/pipeline/transforms"
 )
 
 // ClaudeToolCallAnalyzer identifies tool calls from Claude API HTTP traffic
 // and correlates OS-level process events as context (os_activities).
 //
 // It follows the Claude API tool-use protocol:
-//   1. Response from Claude contains tool_use content blocks
-//   2. Agent executes the tool (generating FILE_OPEN, EXEC, etc.)
-//   3. Agent sends tool_result back to Claude
+//  1. Response from Claude contains tool_use content blocks
+//  2. Agent executes the tool (generating FILE_OPEN, EXEC, etc.)
+//  3. Agent sends tool_result back to Claude
 //
 // Non-HTTP/non-process events pass through unmodified.
 type ClaudeToolCallAnalyzer struct {
@@ -24,7 +25,7 @@ type ClaudeToolCallAnalyzer struct {
 	pending  map[string]*pendingToolCall // keyed by tool_use_id
 	timeout  time.Duration
 	agentPID uint32 // track the main agent PID for process event correlation
-	inner    *statefulAnalyzer
+	inner    *transforms.StatefulAnalyzer
 }
 
 type pendingToolCall struct {
@@ -76,7 +77,7 @@ func newClaudeToolCallBase(timeout time.Duration) *ClaudeToolCallAnalyzer {
 }
 
 func (c *ClaudeToolCallAnalyzer) initInner() {
-	c.inner = NewStatefulAnalyzer("claude_tool_call_analyzer", StatefulOpts{
+	c.inner = transforms.NewStatefulAnalyzer("claude_tool_call_analyzer", transforms.StatefulOpts{
 		BufSize:      100,
 		TickInterval: 5 * time.Second,
 		OnEvent: func(ev *event.Event, emit func(*event.Event)) {
@@ -203,7 +204,7 @@ func findToolResults(body string) []toolResultMatch {
 	return results
 }
 
-// extractToolResultsFromMessage 从单条 user message 中提取 tool_result 块。
+// extractToolResultsFromMessage extracts tool_result blocks from a single user message.
 func extractToolResultsFromMessage(msg interface{}) []toolResultMatch {
 	msgMap, ok := msg.(map[string]interface{})
 	if !ok || msgMap["role"] != "user" {

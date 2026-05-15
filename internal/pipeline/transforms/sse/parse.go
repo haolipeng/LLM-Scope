@@ -1,4 +1,4 @@
-package transforms
+package sse
 
 import (
 	"encoding/json"

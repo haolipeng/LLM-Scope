@@ -6,6 +6,7 @@ import (
 	"os"
 
 	_ "github.com/marcboeker/go-duckdb"
+	pipelinesink "github.com/haolipeng/LLM-Scope/internal/pipeline/sink"
 	"github.com/spf13/cobra"
 )
 
@@ -19,12 +20,12 @@ var clearSecurityCmd = &cobra.Command{
 
 示例：
   ./agentsight clear-security-alerts
-  ./agentsight clear-security-alerts --duckdb-path ./agentsight.duckdb`,
+  ./agentsight clear-security-alerts --duckdb-path ~/.agentsight/agentsight.duckdb`,
 	Run: runClearSecurity,
 }
 
 func init() {
-	clearSecurityCmd.Flags().StringVar(&clearSecurityDuckDBPath, "duckdb-path", "agentsight.duckdb", "DuckDB 文件路径（与 record --duckdb-path 一致）")
+	clearSecurityCmd.Flags().StringVar(&clearSecurityDuckDBPath, "duckdb-path", pipelinesink.DefaultDuckDBPath(), "DuckDB 文件路径（与 record --duckdb-path 一致）")
 	rootCmd.AddCommand(clearSecurityCmd)
 }
 

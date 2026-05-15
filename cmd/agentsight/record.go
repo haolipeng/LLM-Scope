@@ -1,6 +1,7 @@
 package main
 
 import (
+	pipelinesink "github.com/haolipeng/LLM-Scope/internal/pipeline/sink"
 	"github.com/spf13/cobra"
 )
 
@@ -30,7 +31,7 @@ func init() {
 	recordCmd.Flags().BoolVar(&recordRotate, "rotate-logs", true, "日志轮转")
 	recordCmd.Flags().IntVar(&recordMaxSize, "max-log-size", 10, "最大日志大小(MB)")
 	recordCmd.Flags().IntVar(&recordServerPort, "server-port", 7395, "Web 端口")
-	recordCmd.Flags().StringVar(&recordDuckDBPath, "duckdb-path", "agentsight.duckdb", "DuckDB 数据库文件路径")
+	recordCmd.Flags().StringVar(&recordDuckDBPath, "duckdb-path", pipelinesink.DefaultDuckDBPath(), "DuckDB 数据库文件路径")
 	recordCmd.Flags().StringVar(&recordHTTPPCap, "http-pcap", "", "将解析后的 HTTP 写入合成 TCP 的 pcap 文件路径（空则关闭）")
 
 	_ = recordCmd.MarkFlagRequired("comm")
