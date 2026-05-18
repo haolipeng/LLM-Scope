@@ -12,11 +12,14 @@ import (
 	"github.com/haolipeng/LLM-Scope/internal/event"
 )
 
-func openTestDB(t *testing.T) *DuckDBSink {
+func openTestDB(t *testing.T) (*DuckDBSink, *sql.DB) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.duckdb")
-	sink, err := NewDuckDBSink(DuckDBConfig{
-		DBPath:        dbPath,
+	db, err := OpenDuckDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDuckDB: %v", err)
+	}
+	sink, err := NewDuckDBSink(db, DuckDBConfig{
 		BatchSize:     10,
 		FlushInterval: 100 * time.Millisecond,
 		SessionID:     "test-session",
@@ -24,11 +27,12 @@ func openTestDB(t *testing.T) *DuckDBSink {
 	if err != nil {
 		t.Fatalf("NewDuckDBSink: %v", err)
 	}
-	return sink
+	t.Cleanup(func() { db.Close() })
+	return sink, db
 }
 
 func TestDuckDB_CreateSchema(t *testing.T) {
-	sink := openTestDB(t)
+	sink, db := openTestDB(t)
 	defer sink.Close()
 
 	// Verify all tables exist.
@@ -44,7 +48,7 @@ func TestDuckDB_CreateSchema(t *testing.T) {
 	}
 	for _, tbl := range tables {
 		var count int
-		err := sink.DB().QueryRow("SELECT COUNT(*) FROM " + tbl).Scan(&count)
+		err := db.QueryRow("SELECT COUNT(*) FROM " + tbl).Scan(&count)
 		if err != nil {
 			t.Errorf("table %s not accessible: %v", tbl, err)
 		}
@@ -62,7 +66,7 @@ func TestDuckDB_CreateSchema(t *testing.T) {
 		"v_exfiltration_risk",
 	}
 	for _, v := range views {
-		_, err := sink.DB().Query("SELECT * FROM " + v + " LIMIT 0")
+		_, err := db.Query("SELECT * FROM " + v + " LIMIT 0")
 		if err != nil {
 			t.Errorf("view %s not accessible: %v", v, err)
 		}
@@ -70,14 +74,14 @@ func TestDuckDB_CreateSchema(t *testing.T) {
 
 	// Verify session record was created.
 	var sid string
-	err := sink.DB().QueryRow("SELECT session_id FROM sessions WHERE session_id = 'test-session'").Scan(&sid)
+	err := db.QueryRow("SELECT session_id FROM sessions WHERE session_id = 'test-session'").Scan(&sid)
 	if err != nil {
 		t.Errorf("session record not found: %v", err)
 	}
 }
 
 func TestDuckDB_InsertProcessEvent(t *testing.T) {
-	sink := openTestDB(t)
+	sink, db := openTestDB(t)
 	defer sink.Close()
 
 	data := map[string]interface{}{
@@ -104,14 +108,14 @@ func TestDuckDB_InsertProcessEvent(t *testing.T) {
 	sink.flush()
 
 	var count int
-	sink.DB().QueryRow("SELECT COUNT(*) FROM events_process").Scan(&count)
+	db.QueryRow("SELECT COUNT(*) FROM events_process").Scan(&count)
 	if count != 1 {
 		t.Errorf("expected 1 process event, got %d", count)
 	}
 
 	var eventType, filename sql.NullString
 	var ppid sql.NullInt64
-	sink.DB().QueryRow("SELECT event_type, filename, ppid FROM events_process").
+	db.QueryRow("SELECT event_type, filename, ppid FROM events_process").
 		Scan(&eventType, &filename, &ppid)
 
 	if !eventType.Valid || eventType.String != "EXEC" {
@@ -123,7 +127,7 @@ func TestDuckDB_InsertProcessEvent(t *testing.T) {
 }
 
 func TestDuckDB_InsertToolCallEvent(t *testing.T) {
-	sink := openTestDB(t)
+	sink, db := openTestDB(t)
 	defer sink.Close()
 
 	data := map[string]interface{}{
@@ -152,7 +156,7 @@ func TestDuckDB_InsertToolCallEvent(t *testing.T) {
 	sink.flush()
 
 	var toolName, toolStatus sql.NullString
-	sink.DB().QueryRow(`
+	db.QueryRow(`
 		SELECT tool_name, tool_status
 		FROM events_tool_call
 	`).Scan(&toolName, &toolStatus)
@@ -166,7 +170,7 @@ func TestDuckDB_InsertToolCallEvent(t *testing.T) {
 }
 
 func TestDuckDB_InsertSystemEvent(t *testing.T) {
-	sink := openTestDB(t)
+	sink, db := openTestDB(t)
 	defer sink.Close()
 
 	data := map[string]interface{}{
@@ -193,7 +197,7 @@ func TestDuckDB_InsertSystemEvent(t *testing.T) {
 	var cpuPercent sql.NullFloat64
 	var memRss sql.NullInt64
 	var threads sql.NullInt64
-	sink.DB().QueryRow(`
+	db.QueryRow(`
 		SELECT cpu_percent, mem_rss_kb, thread_count
 		FROM events_system
 	`).Scan(&cpuPercent, &memRss, &threads)
@@ -210,7 +214,7 @@ func TestDuckDB_InsertSystemEvent(t *testing.T) {
 }
 
 func TestDuckDB_InsertSecurityEvent(t *testing.T) {
-	sink := openTestDB(t)
+	sink, db := openTestDB(t)
 	defer sink.Close()
 
 	evidence := []map[string]interface{}{
@@ -243,7 +247,7 @@ func TestDuckDB_InsertSecurityEvent(t *testing.T) {
 	var alertType, riskLevel, desc sql.NullString
 	var srcTable sql.NullString
 	var evJSON sql.NullString
-	sink.DB().QueryRow(`
+	db.QueryRow(`
 		SELECT alert_type, risk_level, description, source_table, evidence_json
 		FROM events_security
 	`).Scan(&alertType, &riskLevel, &desc, &srcTable, &evJSON)
@@ -264,7 +268,7 @@ func TestDuckDB_InsertSecurityEvent(t *testing.T) {
 }
 
 func TestDuckDB_SecuritySourceEventIDFromStreamSeq(t *testing.T) {
-	sink := openTestDB(t)
+	sink, db := openTestDB(t)
 	defer sink.Close()
 
 	// Use an explicit StreamSeq so the test is independent of global counter.
@@ -311,11 +315,11 @@ func TestDuckDB_SecuritySourceEventIDFromStreamSeq(t *testing.T) {
 	sink.flush()
 
 	var procID uint64
-	if err := sink.DB().QueryRow(`SELECT id FROM events_process LIMIT 1`).Scan(&procID); err != nil {
+	if err := db.QueryRow(`SELECT id FROM events_process LIMIT 1`).Scan(&procID); err != nil {
 		t.Fatal(err)
 	}
 	var srcID sql.NullInt64
-	if err := sink.DB().QueryRow(`SELECT source_event_id FROM events_security LIMIT 1`).Scan(&srcID); err != nil {
+	if err := db.QueryRow(`SELECT source_event_id FROM events_security LIMIT 1`).Scan(&srcID); err != nil {
 		t.Fatal(err)
 	}
 	if !srcID.Valid || uint64(srcID.Int64) != procID {
@@ -324,7 +328,7 @@ func TestDuckDB_SecuritySourceEventIDFromStreamSeq(t *testing.T) {
 }
 
 func TestDuckDB_BatchInsertMixed(t *testing.T) {
-	sink := openTestDB(t)
+	sink, db := openTestDB(t)
 	defer sink.Close()
 
 	// Insert events of different types.
@@ -355,7 +359,7 @@ func TestDuckDB_BatchInsertMixed(t *testing.T) {
 	// Verify each table got the right number of rows.
 	assertCount := func(table string, expected int) {
 		var count int
-		sink.DB().QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count)
+		db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count)
 		if count != expected {
 			t.Errorf("expected %d rows in %s, got %d", expected, table, count)
 		}
@@ -372,8 +376,12 @@ func TestDuckDB_BatchInsertMixed(t *testing.T) {
 
 func TestDuckDB_FlushOnInterval(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "interval.duckdb")
-	sink, err := NewDuckDBSink(DuckDBConfig{
-		DBPath:        dbPath,
+	testDB, err := OpenDuckDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDuckDB: %v", err)
+	}
+	defer testDB.Close()
+	sink, err := NewDuckDBSink(testDB, DuckDBConfig{
 		BatchSize:     1000, // very high, won't trigger batch flush
 		FlushInterval: 100 * time.Millisecond,
 		SessionID:     "interval-test",
@@ -419,13 +427,13 @@ func TestDuckDB_FlushOnInterval(t *testing.T) {
 }
 
 func TestDuckDB_SessionTable(t *testing.T) {
-	sink := openTestDB(t)
+	sink, db := openTestDB(t)
 	defer sink.Close()
 
 	// Verify session was auto-created.
 	var sid string
 	var startTime sql.NullTime
-	sink.DB().QueryRow("SELECT session_id, start_time FROM sessions WHERE session_id = 'test-session'").
+	db.QueryRow("SELECT session_id, start_time FROM sessions WHERE session_id = 'test-session'").
 		Scan(&sid, &startTime)
 
 	if sid != "test-session" {
@@ -438,8 +446,12 @@ func TestDuckDB_SessionTable(t *testing.T) {
 
 func TestDuckDB_Consume(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "consume.duckdb")
-	sink, err := NewDuckDBSink(DuckDBConfig{
-		DBPath:        dbPath,
+	testDB, err := OpenDuckDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDuckDB: %v", err)
+	}
+	defer testDB.Close()
+	sink, err := NewDuckDBSink(testDB, DuckDBConfig{
 		BatchSize:     10,
 		FlushInterval: 100 * time.Millisecond,
 		SessionID:     "consume-test",
@@ -488,8 +500,12 @@ func TestDuckDB_Consume(t *testing.T) {
 
 func TestDuckDB_BatchFlush(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "batch.duckdb")
-	sink, err := NewDuckDBSink(DuckDBConfig{
-		DBPath:        dbPath,
+	db, err := OpenDuckDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDuckDB: %v", err)
+	}
+	defer db.Close()
+	sink, err := NewDuckDBSink(db, DuckDBConfig{
 		BatchSize:     10, // 5 process rows + 5 process_tree rows = 10
 		FlushInterval: 10 * time.Second, // very long, won't trigger
 		SessionID:     "batch-test",
@@ -516,14 +532,14 @@ func TestDuckDB_BatchFlush(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	var count int
-	sink.DB().QueryRow("SELECT COUNT(*) FROM events_process").Scan(&count)
+	db.QueryRow("SELECT COUNT(*) FROM events_process").Scan(&count)
 	if count != 5 {
 		t.Errorf("expected 5 rows after batch flush, got %d", count)
 	}
 }
 
 func TestDuckDB_ToolCallStartSkipped(t *testing.T) {
-	sink := openTestDB(t)
+	sink, db := openTestDB(t)
 	defer sink.Close()
 
 	// tool_call_start should be skipped.
@@ -557,14 +573,14 @@ func TestDuckDB_ToolCallStartSkipped(t *testing.T) {
 	sink.flush()
 
 	var count int
-	sink.DB().QueryRow("SELECT COUNT(*) FROM events_tool_call").Scan(&count)
+	db.QueryRow("SELECT COUNT(*) FROM events_tool_call").Scan(&count)
 	if count != 1 {
 		t.Errorf("expected 1 tool_call event (end only), got %d", count)
 	}
 }
 
 func TestDuckDB_ViewToolCallStats(t *testing.T) {
-	sink := openTestDB(t)
+	sink, db := openTestDB(t)
 	defer sink.Close()
 
 	for i := 0; i < 10; i++ {
@@ -588,7 +604,7 @@ func TestDuckDB_ViewToolCallStats(t *testing.T) {
 
 	var callCount, successCount int
 	var p50 sql.NullFloat64
-	err := sink.DB().QueryRow(`
+	err := db.QueryRow(`
 		SELECT call_count, success_count, p50_ms
 		FROM v_tool_call_stats
 		WHERE tool_name = 'fs.read'

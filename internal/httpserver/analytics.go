@@ -28,6 +28,7 @@ func registerAnalyticsRoutes(api *gin.RouterGroup, db *sql.DB) {
 		analytics.GET("/security/sensitive-access", handleView(db, "SELECT * FROM v_exfiltration_risk"))
 		analytics.GET("/sessions", handleSessions(db))
 		analytics.GET("/timeline", handleTimeline(db))
+		analytics.GET("/process/:pid/ai-traffic", handleAITraffic(db))
 	}
 }
 

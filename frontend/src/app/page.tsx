@@ -14,9 +14,10 @@ import { UploadPanel } from '@/components/UploadPanel';
 import { LanguageSwitcher } from '@/components/common/LanguageSwitcher';
 import { Event } from '@/types/event';
 import { adaptGoEvent, isGoEventFormat } from '@/utils/eventAdapter';
+import { AITrafficView } from '@/components/AITrafficView';
 import { useTranslation } from '@/i18n';
 
-type ViewMode = 'log' | 'timeline' | 'process-tree' | 'metrics';
+type ViewMode = 'log' | 'timeline' | 'process-tree' | 'metrics' | 'ai-traffic';
 
 // Go backend URL for direct SSE connection (bypasses Next.js proxy which may buffer SSE)
 const GO_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:7395';
@@ -34,6 +35,10 @@ function HomeContent() {
   const [error, setError] = useState<string>('');
   const [isParsed, setIsParsed] = useState(false);
   const [showUploadPanel, setShowUploadPanel] = useState(false);
+  const [selectedPid, setSelectedPid] = useState<number | null>(() => {
+    const pidParam = searchParams.get('pid');
+    return pidParam ? parseInt(pidParam, 10) || null : null;
+  });
 
   const parseLogContent = (content: string) => {
     if (!content.trim()) {
@@ -178,7 +183,18 @@ function HomeContent() {
   }, []);
 
   // Deep link: /?session_id=... → timeline + server sync for that session
+  // Deep link: /?pid=... → ai-traffic view
   useEffect(() => {
+    const pidParam = searchParams.get('pid');
+    if (pidParam) {
+      const parsed = parseInt(pidParam, 10);
+      if (!isNaN(parsed)) {
+        setSelectedPid(parsed);
+        setViewMode('ai-traffic');
+        return;
+      }
+    }
+
     const sid = searchParams.get('session_id');
     if (sid) {
       setViewMode('timeline');
@@ -245,7 +261,7 @@ function HomeContent() {
         </div>
 
         {/* Upload Panel */}
-        {showUploadPanel && (
+        {showUploadPanel && events.length > 0 && (
           <UploadPanel
             logContent={logContent}
             loading={loading}
@@ -339,6 +355,19 @@ function HomeContent() {
                   >
                     {t('app.metrics')}
                   </button>
+                  <button
+                    onClick={() => setViewMode('ai-traffic')}
+                    disabled={!selectedPid}
+                    className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                      viewMode === 'ai-traffic'
+                        ? 'bg-blue-600 text-white'
+                        : selectedPid
+                          ? 'text-gray-600 hover:bg-gray-100'
+                          : 'text-gray-300 cursor-not-allowed'
+                    }`}
+                  >
+                    {t('app.aiTraffic')}
+                  </button>
                 </div>
 
                 {/* Action Buttons */}
@@ -368,7 +397,12 @@ function HomeContent() {
           </div>
 
           {/* View Content */}
-          {events.length > 0 ? (
+          {viewMode === 'ai-traffic' && selectedPid ? (
+            <AITrafficView
+              pid={selectedPid}
+              onBack={() => setViewMode('process-tree')}
+            />
+          ) : events.length > 0 ? (
             viewMode === 'log' ? (
               <LogView events={events} />
             ) : viewMode === 'timeline' ? (
@@ -376,7 +410,10 @@ function HomeContent() {
             ) : viewMode === 'metrics' ? (
               <ResourceMetricsView events={events} />
             ) : (
-              <ProcessTreeView events={events} />
+              <ProcessTreeView events={events} onViewAITraffic={(pid) => {
+                setSelectedPid(pid);
+                setViewMode('ai-traffic');
+              }} />
             )
           ) : (
             <div className="bg-white rounded-lg shadow-md p-12 text-center">
@@ -389,20 +426,22 @@ function HomeContent() {
                 ) : (
                   <>
                     <p className="text-lg mb-4">{t('app.noEventsLoaded')}</p>
-                    <div className="space-x-4">
+                    <div className="mb-6">
                       <button
                         onClick={() => syncData(sessionFilter)}
                         className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors"
                       >
                         {t('app.syncFromServer')}
                       </button>
-                      <button
-                        onClick={() => setShowUploadPanel(true)}
-                        className="px-6 py-3 bg-gray-600 text-white font-semibold rounded-lg hover:bg-gray-700 transition-colors"
-                      >
-                        {t('app.uploadLogFile')}
-                      </button>
                     </div>
+                    <UploadPanel
+                      logContent={logContent}
+                      loading={loading}
+                      error={error}
+                      onFileUpload={handleFileUpload}
+                      onTextPaste={handleTextPaste}
+                      onParseLog={() => parseLogContent(logContent)}
+                    />
                   </>
                 )}
               </div>

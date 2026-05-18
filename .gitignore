@@ -1,6 +1,7 @@
 /agentsight
 frontend/out/
 agentsight.duckdb
+data/
 record.log*
 .build-stamps/
 agentsight.duckdb.wal

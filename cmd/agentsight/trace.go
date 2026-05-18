@@ -270,22 +270,19 @@ func buildRunners(cfg TraceConfig) []pipelinetypes.Runner {
 	return runners
 }
 
-// buildSinks 构建输出 sink 列表和可选的 analytics DB 连接
-func buildSinks(cmd *cobra.Command, cfg TraceConfig) ([]pipelinetypes.Sink, *sql.DB) {
+// buildSinks 构建输出 sink 列表；若 db 非 nil 则创建 DuckDB sink
+func buildSinks(cmd *cobra.Command, cfg TraceConfig, db *sql.DB) []pipelinetypes.Sink {
 	var sinks []pipelinetypes.Sink
-	var analyticsDB *sql.DB
-	if cfg.Output.DuckDBPath != "" {
-		duckdbSink, err := pipelinesink.NewDuckDBSink(pipelinesink.DuckDBConfig{
-			DBPath:     cfg.Output.DuckDBPath,
+	if db != nil {
+		duckdbSink, err := pipelinesink.NewDuckDBSink(db, pipelinesink.DuckDBConfig{
 			CommFilter: cfg.Comm,
 			BinaryPath: cfg.SSL.BinaryPath,
 		})
 		if err != nil {
-			cliErrf(cmd, "启动 DuckDB 失败: %v\n", err)
+			cliErrf(cmd, "启动 DuckDB sink 失败: %v\n", err)
 			os.Exit(1)
 		}
 		sinks = append(sinks, duckdbSink)
-		analyticsDB = duckdbSink.DB()
 	}
 	if cfg.Output.LogFile != "" {
 		sinks = append(sinks, pipelinesink.NewFileLogger(cfg.Output.LogFile, cfg.Output.RotateLogs, cfg.Output.MaxLogSize))
@@ -293,7 +290,7 @@ func buildSinks(cmd *cobra.Command, cfg TraceConfig) ([]pipelinetypes.Sink, *sql
 	if !cfg.Output.Quiet {
 		sinks = append(sinks, pipelinesink.NewOutput())
 	}
-	return sinks, analyticsDB
+	return sinks
 }
 
 // buildGlobalTransforms 构建全局分析管道的 transform 列表
@@ -356,8 +353,19 @@ func executeTrace(cmd *cobra.Command, cfg TraceConfig) {
 	})
 	runners := buildRunners(cfg)
 
-	// Sink 和 Server
-	sinks, analyticsDB := buildSinks(cmd, cfg)
+	// DuckDB：上层打开，分别传给 sink（写）和 server（读）
+	var analyticsDB *sql.DB
+	if cfg.Output.DuckDBPath != "" {
+		db, err := pipelinesink.OpenDuckDB(cfg.Output.DuckDBPath)
+		if err != nil {
+			cliErrf(cmd, "启动 DuckDB 失败: %v\n", err)
+			os.Exit(1)
+		}
+		analyticsDB = db
+		defer analyticsDB.Close()
+	}
+
+	sinks := buildSinks(cmd, cfg, analyticsDB)
 	if cfg.Output.Server {
 		startServer(ctx, cfg.Output.ServerPort, analyticsDB)
 	}

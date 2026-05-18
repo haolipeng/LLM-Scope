@@ -19,21 +19,17 @@ import (
 	"go.uber.org/zap"
 )
 
-// DefaultDuckDBPath returns the default DuckDB file path: ~/.agentsight/agentsight.duckdb.
+// DefaultDuckDBPath returns the default DuckDB file path: ./data/agentsight.duckdb.
 // It creates the directory if it does not exist.
 func DefaultDuckDBPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "."
-	}
-	dir := filepath.Join(home, ".agentsight")
+	dir := filepath.Join(".", "data")
 	_ = os.MkdirAll(dir, 0o755)
 	return filepath.Join(dir, "agentsight.duckdb")
 }
 
 // DuckDBConfig controls DuckDBSink behaviour.
 type DuckDBConfig struct {
-	DBPath        string        // database file path, default ~/.agentsight/agentsight.duckdb
+	DBPath        string        // database file path, default ./data/agentsight.duckdb
 	BatchSize     int           // flush threshold, default 1000
 	FlushInterval time.Duration // periodic flush, default 5s
 	SessionID     string        // session identifier, auto-generated when empty
@@ -98,23 +94,29 @@ type DuckDBSink struct {
 	seenPIDs   map[uint32]bool   // tracks PIDs already inserted into process_tree
 }
 
-// NewDuckDBSink opens (or creates) the database, runs schema DDL, and returns
-// a ready-to-use sink. The caller must eventually call Close().
-func NewDuckDBSink(cfg DuckDBConfig) (*DuckDBSink, error) {
-	cfg.defaults()
-
-	db, err := sql.Open("duckdb", cfg.DBPath)
+// OpenDuckDB opens (or creates) the database and runs schema DDL.
+// The caller owns the returned *sql.DB and is responsible for closing it.
+func OpenDuckDB(dbPath string) (*sql.DB, error) {
+	if dbPath == "" {
+		dbPath = DefaultDuckDBPath()
+	}
+	db, err := sql.Open("duckdb", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("duckdb open: %w", err)
 	}
-
-	// Apply schema.
 	for _, ddl := range allSchemaSQL {
 		if _, err := db.Exec(ddl); err != nil {
 			db.Close()
 			return nil, fmt.Errorf("duckdb schema: %w", err)
 		}
 	}
+	return db, nil
+}
+
+// NewDuckDBSink creates a sink that writes events into the given DuckDB connection.
+// The caller owns the *sql.DB lifecycle; the sink will NOT close it.
+func NewDuckDBSink(db *sql.DB, cfg DuckDBConfig) (*DuckDBSink, error) {
+	cfg.defaults()
 
 	// Ensure session record exists.
 	hostname, _ := os.Hostname()
@@ -161,8 +163,6 @@ func nilIfEmpty(s string) *string {
 	return &s
 }
 
-// DB exposes the underlying connection for analytics queries.
-func (s *DuckDBSink) DB() *sql.DB { return s.db }
 
 // Consume reads events from the channel and writes them to DuckDB in batches.
 func (s *DuckDBSink) Consume(ctx context.Context, in <-chan *event.Event) {
@@ -223,8 +223,12 @@ func (s *DuckDBSink) addEvent(e *event.Event) {
 	case "ssl":
 		s.buf.ssl = append(s.buf.ssl, extractSSLRow(e, s.cfg.SessionID))
 	case "http_parser":
+		logging.NamedZap("duckdb").Info("buffering http event",
+			zap.Uint32("pid", e.PID), zap.String("comm", e.Comm))
 		s.buf.http = append(s.buf.http, extractHTTPRow(e, s.cfg.SessionID))
 	case "sse_processor":
+		logging.NamedZap("duckdb").Info("buffering sse event",
+			zap.Uint32("pid", e.PID), zap.String("comm", e.Comm))
 		s.buf.sse = append(s.buf.sse, extractSSERow(e, s.cfg.SessionID))
 	case "security":
 		s.buf.security = append(s.buf.security, extractSecurityRow(e, s.cfg.SessionID))
@@ -249,6 +253,15 @@ func (s *DuckDBSink) flush() {
 	s.mu.Unlock()
 
 	total := batch.total()
+	logging.NamedZap("duckdb").Info("flushing batch",
+		zap.Int("total", total),
+		zap.Int("process", len(batch.process)),
+		zap.Int("tool_call", len(batch.toolCall)),
+		zap.Int("ssl", len(batch.ssl)),
+		zap.Int("http", len(batch.http)),
+		zap.Int("sse", len(batch.sse)),
+		zap.Int("security", len(batch.security)),
+	)
 	if err := s.insertBatch(&batch); err != nil {
 		logging.NamedZap("duckdb").Error("flush error", zap.Int("rows", total), zap.Error(err))
 	}
@@ -256,11 +269,10 @@ func (s *DuckDBSink) flush() {
 
 func (s *DuckDBSink) flushAndClose() {
 	s.flush()
-	// Update session end_time.
+	// Update session end_time (db lifecycle is managed by the caller).
 	if s.db != nil {
 		_, _ = s.db.Exec("UPDATE sessions SET end_time = ? WHERE session_id = ?",
 			time.Now(), s.cfg.SessionID)
-		s.db.Close()
 	}
 }
 

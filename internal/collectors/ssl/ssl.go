@@ -40,7 +40,7 @@ var rwEventNames = []string{"READ/RECV", "WRITE/SEND", "HANDSHAKE"}
 type Config struct {
 	PID        int
 	UID        int
-	Comm       string
+	Comm       string // 逗号分隔的进程名列表，如 "node,claude"
 	BinaryPath string
 	OpenSSL    bool
 	GnuTLS     bool
@@ -48,18 +48,34 @@ type Config struct {
 	Handshake  bool
 }
 
+// commSet 将逗号分隔的 Comm 拆分为 set，用于快速查找。
+func (c Config) commSet() map[string]struct{} {
+	if c.Comm == "" {
+		return nil
+	}
+	set := make(map[string]struct{})
+	for _, s := range strings.Split(c.Comm, ",") {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			set[s] = struct{}{}
+		}
+	}
+	return set
+}
+
 // Runner loads sslsniff BPF program and reads SSL events via ring buffer.
 type Runner struct {
 	runtimebase.BaseRunner
-	config Config
-	objs   bpf.Objects
+	config  Config
+	objs    bpf.Objects
+	commSet map[string]struct{} // 预计算的 comm 集合
 }
 
 func New(config Config) *Runner {
 	if !config.OpenSSL && !config.GnuTLS && !config.NSS && config.BinaryPath == "" {
 		config.OpenSSL = true
 	}
-	r := &Runner{config: config}
+	r := &Runner{config: config, commSet: config.commSet()}
 	r.BaseRunner = runtimebase.BaseRunner{Label: "[SSL]"}
 	return r
 }
@@ -216,8 +232,10 @@ func (r *Runner) parseSSLEvent(raw []byte) *event.Event {
 		isHandshake = int32(le.Uint32(raw[isHandshakeOff:])) != 0
 	}
 
-	if r.config.Comm != "" && comm != r.config.Comm {
-		return nil
+	if r.commSet != nil {
+		if _, ok := r.commSet[comm]; !ok {
+			return nil
+		}
 	}
 	if isHandshake && !r.config.Handshake {
 		return nil

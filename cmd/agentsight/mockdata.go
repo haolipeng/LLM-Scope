@@ -32,17 +32,12 @@ func init() {
 const mockSessionID = "demo-mock-session"
 
 func runMockData(cmd *cobra.Command, _ []string) {
-	sink, err := pipelinesink.NewDuckDBSink(pipelinesink.DuckDBConfig{
-		DBPath:    mockDuckDBPath,
-		SessionID: "mock-data-tool",
-	})
+	db, err := pipelinesink.OpenDuckDB(mockDuckDBPath)
 	if err != nil {
 		cliErrf(cmd, "打开 DuckDB 失败: %v\n", err)
 		os.Exit(1)
 	}
-	defer sink.Close()
-
-	db := sink.DB()
+	defer db.Close()
 	_, err = db.Exec(`INSERT OR IGNORE INTO sessions (session_id, start_time) VALUES (?, ?)`,
 		mockSessionID, time.Now())
 	if err != nil {

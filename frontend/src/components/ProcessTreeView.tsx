@@ -18,9 +18,10 @@ import { useTranslation } from '@/i18n';
 
 interface ProcessTreeViewProps {
   events: Event[];
+  onViewAITraffic?: (pid: number) => void;
 }
 
-export function ProcessTreeView({ events }: ProcessTreeViewProps) {
+export function ProcessTreeView({ events, onViewAITraffic }: ProcessTreeViewProps) {
   const { t } = useTranslation();
   const [expandedProcesses, setExpandedProcesses] = useState<Set<number>>(new Set());
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set());
@@ -104,6 +105,7 @@ export function ProcessTreeView({ events }: ProcessTreeViewProps) {
                 expandedEvents={expandedEvents}
                 onToggleProcess={toggleProcessExpansion}
                 onToggleEvent={toggleEventExpansion}
+                onViewAITraffic={onViewAITraffic}
               />
             ))}
           </div>

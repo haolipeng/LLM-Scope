@@ -4,7 +4,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDownIcon, ChevronRightIcon, CpuChipIcon, DocumentIcon } from '@heroicons/react/24/outline';
+import { ChevronDownIcon, ChevronRightIcon, CpuChipIcon, DocumentIcon, GlobeAltIcon } from '@heroicons/react/24/outline';
 import { ProcessNode as ProcessNodeType, ParsedEvent, TimelineItem } from '@/utils/eventParsers';
 import { UnifiedBlock } from './UnifiedBlock';
 import { adaptEventToUnifiedBlock } from './BlockAdapters';
@@ -101,6 +101,7 @@ interface ProcessNodeProps {
   expandedEvents: Set<string>;
   onToggleProcess: (pid: number) => void;
   onToggleEvent: (eventId: string) => void;
+  onViewAITraffic?: (pid: number) => void;
 }
 
 export function ProcessNode({
@@ -109,7 +110,8 @@ export function ProcessNode({
   expandedProcesses,
   expandedEvents,
   onToggleProcess,
-  onToggleEvent
+  onToggleEvent,
+  onViewAITraffic,
 }: ProcessNodeProps) {
   const { t } = useTranslation();
   const isExpanded = expandedProcesses.has(process.pid);
@@ -211,6 +213,7 @@ export function ProcessNode({
           expandedEvents={expandedEvents}
           onToggleProcess={onToggleProcess}
           onToggleEvent={onToggleEvent}
+          onViewAITraffic={onViewAITraffic}
         />
       );
     }
@@ -258,6 +261,20 @@ export function ProcessNode({
               {getEventBadges()}
             </div>
           </div>
+
+          {/* AI Traffic button */}
+          {onViewAITraffic && (
+            <button
+              title={t('aiTraffic.viewTraffic')}
+              onClick={(e) => {
+                e.stopPropagation();
+                onViewAITraffic(process.pid);
+              }}
+              className="ml-2 p-1.5 rounded-md text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors flex-shrink-0"
+            >
+              <GlobeAltIcon className="h-5 w-5" />
+            </button>
+          )}
         </div>
       </div>
 
